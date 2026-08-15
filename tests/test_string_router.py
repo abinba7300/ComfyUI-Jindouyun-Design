@@ -41,8 +41,8 @@ class StringRouterTests(unittest.TestCase):
 
     def test_normalize_lora_signal_keeps_full_name_and_removes_supported_suffix(self):
         self.assertEqual(
-            normalize_lora_signal('  "K9E\\DSM\\DSMQIAOXING-K9E-v2.safetensors"  '),
-            "K9E/DSM/DSMQIAOXING-K9E-v2",
+            normalize_lora_signal('  "demo-model\\styles\\DEMO-STYLE-LORA-v2.safetensors"  '),
+            "demo-model/styles/DEMO-STYLE-LORA-v2",
         )
         self.assertEqual(normalize_lora_signal("name.CKPT"), "name")
 
@@ -53,11 +53,11 @@ class StringRouterTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            route_string("DSMQIAOXING-K9E-8-V1.1_4000_loss-0.11724", value),
+            route_string("DEMO-STYLE-LORA-V1.1_000004000.safetensors", value),
             ("first, prompt", "matched", "V1.1 方案", "V1.1"),
         )
         self.assertEqual(
-            route_string("DSMQIAOXING-K9E-8-v1.0_4600_loss-0.18666", value),
+            route_string("DEMO-STYLE-LORA-V1.0_000004600.safetensors", value),
             ("second, prompt", "matched", "V1.0 方案", "V1.0"),
         )
 
@@ -77,9 +77,9 @@ class StringRouterTests(unittest.TestCase):
         self.assertEqual(route_string("product-v1.0-extra", value)[1], "unmatched")
 
     def test_old_full_name_binding_still_matches_as_a_long_keyword(self):
-        value = config(scheme("旧方案", ["DSMQIAOXING-K9E-v1"], ["legacy"]))
+        value = config(scheme("旧方案", ["DEMO-STYLE-LORA-v1"], ["legacy"]))
 
-        self.assertEqual(route_string("DSMQIAOXING-K9E-v1.safetensors", value)[0], "legacy")
+        self.assertEqual(route_string("DEMO-STYLE-LORA-v1.safetensors", value)[0], "legacy")
 
     def test_multiple_loras_can_share_one_scheme(self):
         value = config(scheme("共享方案", ["product-front", "product-side"], ["same", "prompt"]))
@@ -90,11 +90,11 @@ class StringRouterTests(unittest.TestCase):
     def test_multiple_matching_schemes_use_first_and_report_conflict(self):
         value = config(
             scheme("第一方案", ["V1.1"], ["first"]),
-            scheme("第二方案", ["K9E"], ["second"]),
+            scheme("第二方案", ["MODEL-X"], ["second"]),
         )
 
         self.assertEqual(
-            route_string("DSMQIAOXING-K9E-8-V1.1_4000", value),
+            route_string("DEMO-STYLE-LORA-MODEL-X-V1.1_000004000.safetensors", value),
             ("first", "conflict", "第一方案", "V1.1"),
         )
 

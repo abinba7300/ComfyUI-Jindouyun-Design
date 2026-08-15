@@ -27,8 +27,8 @@ assert.equal(defaultConfig.schemes[0].segments.length, 3);
 assert.equal(defaultConfig.schemes[0].isDefault, true);
 
 assert.equal(
-    normalizeLoraSignal(' "K9E\\DSM\\DSMQIAOXING-K9E-v2.safetensors" '),
-    "K9E/DSM/DSMQIAOXING-K9E-v2",
+    normalizeLoraSignal(' "demo-model\\styles\\DEMO-STYLE-LORA-v2.safetensors" '),
+    "demo-model/styles/DEMO-STYLE-LORA-v2",
 );
 
 let config = addScheme(defaultConfig, "第二方案");
@@ -47,7 +47,7 @@ config = replaceSchemeBindings(config, secondId, ["V1.1", "V1.0"]);
 assert.equal(config.schemes[1].name, "第二方案");
 assert.deepEqual(config.schemes[1].bindings, ["V1.1", "V1.0"]);
 
-const previewMatch = matchLoraScheme(config, "DSMQIAOXING-K9E-8-V1.1_5100_loss-0.173.safetensors");
+const previewMatch = matchLoraScheme(config, "DEMO-STYLE-LORA-V1.1_000005100.safetensors");
 assert.equal(previewMatch.matchMode, "matched");
 assert.equal(previewMatch.schemeName, "第二方案");
 assert.equal(previewMatch.matchedKeyword, "V1.1");
@@ -79,13 +79,13 @@ const runtimeConfig = normalizeRouterConfig({
     ],
 });
 assert.equal(resolveExecutedSchemeId(runtimeConfig, {
-    loraName: "DSMQIAOXING-K9E-8-V1.1_5200_loss-0.10445",
+    loraName: "DEMO-STYLE-LORA-V1.1_000005200.safetensors",
     matchMode: "matched",
     schemeName: "同名方案",
     matchedKeyword: "V1.1",
 }), "scheme-v11");
 assert.equal(resolveExecutedSchemeId(runtimeConfig, {
-    loraName: "DSMQIAOXING-K9E-8-V1.0_4600_loss-0.18666",
+    loraName: "DEMO-STYLE-LORA-V1.0_000004600.safetensors",
     matchMode: "matched",
     schemeName: "同名方案",
     matchedKeyword: "V1.0",

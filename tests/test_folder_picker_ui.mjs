@@ -132,8 +132,8 @@ const malformedWorkflow = {
         "",
         true,
         false,
-        "E:\\AI大模型仓库\\models\\loras\\K9E",
-        "K9E\\DSMQIAOXING-K9E-8-v1_4500_loss-0.19548.safetensors",
+        "C:\\ComfyUI\\models\\loras\\demo-model",
+        "demo-model\\DEMO-STYLE-LORA-V1.0_000004500.safetensors",
         1,
         1,
         1,
@@ -161,8 +161,8 @@ assert.equal(node.inputs.some((input) => input.name === "启用"), false);
 assert.equal(widgets.length, 13, "mode card must reuse the native random widget");
 assert.equal(widgets.some((widget) => widget.name === "启用"), false);
 assert.equal(randomWidget.value, false);
-assert.equal(folderWidget.value, "E:\\AI大模型仓库\\models\\loras\\K9E");
-assert.equal(fixedWidget.value, "K9E\\DSMQIAOXING-K9E-8-v1_4500_loss-0.19548.safetensors");
+assert.equal(folderWidget.value, "C:\\ComfyUI\\models\\loras\\demo-model");
+assert.equal(fixedWidget.value, "demo-model\\DEMO-STYLE-LORA-V1.0_000004500.safetensors");
 assert.equal(widgets.find((widget) => widget.name === "LoRA值最大").value, 1);
 assert.equal(folderWidget.options.placeholder, "点击此处选择 LoRA 文件夹");
 assert.equal(typeof folderWidget.draw, "function");
@@ -204,7 +204,7 @@ assert.ok(drawnText.includes("目录内全部 LoRA · 每次随机 1 个"));
 drawnText.length = 0;
 folderWidget.draw(context2d, {}, 480, 100, 24);
 assert.equal(drawnText[0], "LoRA目录");
-assert.equal(drawnText[1], "E:\\AI大模型仓库\\models\\loras\\K9E");
+assert.equal(drawnText[1], "C:\\ComfyUI\\models\\loras\\demo-model");
 
 assert.equal(folderWidget.mouse({type: "pointerdown"}), true);
 await new Promise((resolve) => setTimeout(resolve, 0));

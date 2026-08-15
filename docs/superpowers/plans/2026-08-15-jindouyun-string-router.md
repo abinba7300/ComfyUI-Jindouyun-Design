@@ -36,10 +36,10 @@
 ```python
 def test_exact_names_with_same_trigger_route_to_different_text():
     config = make_config([
-        scheme("A", ["DSMQIAOXING-K9E-v1"], ["first", "prompt"]),
-        scheme("B", ["DSMQIAOXING-K9E-v2"], ["second", "prompt"]),
+        scheme("A", ["DEMO-STYLE-LORA-v1"], ["first", "prompt"]),
+        scheme("B", ["DEMO-STYLE-LORA-v2"], ["second", "prompt"]),
     ])
-    assert route_string("DSMQIAOXING-K9E-v2", config)[0] == "second, prompt"
+    assert route_string("DEMO-STYLE-LORA-v2", config)[0] == "second, prompt"
 
 def test_prompt_content_is_never_used_for_matching():
     config = make_config([scheme("A", ["bound-lora"], ["another name appears here"])])
