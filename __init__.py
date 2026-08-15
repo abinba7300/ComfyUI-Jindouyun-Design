@@ -521,7 +521,7 @@ except Exception:
 class JindouyunRandomLora(Krea2RandomLoraModelOnly):
     CATEGORY = "筋斗云设计/LoRA"
     DESCRIPTION = "筋斗云设计随机或固定 LoRA 加载器，只加载到模型，并输出对应触发词。"
-    SEARCH_ALIASES = ["筋斗云随机LORA", "筋斗云设计 LoRA", "随机 LoRA 仅模型"]
+    SEARCH_ALIASES = ["筋斗云-随机LoRA", "筋斗云随机LORA", "筋斗云设计 LoRA", "随机 LoRA 仅模型"]
     RETURN_NAMES = ("模型", "触发词", "LoRA名称", "本次种子", "LoRA强度", "重绘值", "组合名")
 
     @classmethod
@@ -575,19 +575,19 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "JindouyunCanvasComposite": "筋斗云画布合成",
-    "JindouyunImageSwitch": "筋斗云图像尺寸判断",
-    "JindouyunInteractiveCrop": "筋斗云交互裁剪",
-    "JindouyunTransparentCrop": "筋斗云透明裁切",
+    "JindouyunCanvasComposite": "筋斗云-画布合成",
+    "JindouyunImageSwitch": "筋斗云-图像尺寸判断",
+    "JindouyunInteractiveCrop": "筋斗云-交互裁剪",
+    "JindouyunTransparentCrop": "筋斗云-透明裁切",
     "JindouyunShowAnything": "筋斗云-显示任何",
-    "JindouyunNumberSlider": "筋斗云数值滑块",
+    "JindouyunNumberSlider": "筋斗云-数值滑块",
     "JindouyunStringRouter": "筋斗云-提示词",
     "JindouyunLoadImage": "筋斗云-加载图像",
     "JindouyunSaveImage": "筋斗云-保存图像",
-    "JindouyunRandomLora": "筋斗云随机LORA",
+    "JindouyunRandomLora": "筋斗云-随机LoRA",
     "Krea2RandomLoraAuto": "Krea2 Random LoRA (Legacy)",
     "Krea2RandomLoraModelOnly": "Krea2 Model-Only LoRA (Legacy)",
-    "NunchakuRandomLoraModelOnly": "Nunchaku 随机 LoRA",
+    "NunchakuRandomLoraModelOnly": "筋斗云-Nunchaku随机LoRA",
 }
 
 WEB_DIRECTORY = "./js"

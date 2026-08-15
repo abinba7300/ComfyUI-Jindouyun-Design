@@ -316,7 +316,7 @@ class Krea2RandomLoraModelOnly:
     FUNCTION = "load_lora"
     CATEGORY = "Krea2"
     DESCRIPTION = "随机或固定 LoRA 加载器，只加载到模型，并输出对应触发词。"
-    SEARCH_ALIASES = ["筋斗云随机LORA", "Krea2 随机 LoRA", "随机 LoRA 仅模型", "Krea2 LoRA"]
+    SEARCH_ALIASES = ["筋斗云-随机LoRA", "筋斗云随机LORA", "Krea2 随机 LoRA", "随机 LoRA 仅模型", "Krea2 LoRA"]
 
     @classmethod
     def VALIDATE_INPUTS(cls, **kwargs):
@@ -502,7 +502,7 @@ class Krea2RandomLoraModelOnly:
 class NunchakuRandomLoraModelOnly(Krea2RandomLoraModelOnly):
     CATEGORY = "Nunchaku"
     DESCRIPTION = "Nunchaku FLUX 随机或固定 LoRA 加载器，只加载到模型，并输出对应触发词。"
-    SEARCH_ALIASES = ["Nunchaku 随机 LoRA", "Nunchaku FLUX LoRA", "随机 LoRA Nunchaku"]
+    SEARCH_ALIASES = ["筋斗云-Nunchaku随机LoRA", "Nunchaku 随机 LoRA", "Nunchaku FLUX LoRA", "随机 LoRA Nunchaku"]
     OUTPUT_TOOLTIPS = (
         "已经应用所选 Nunchaku FLUX LoRA 的模型。",
         "与所选 LoRA 对应的触发词。",

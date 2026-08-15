@@ -29,7 +29,7 @@ class JindouyunImageSwitchTests(unittest.TestCase):
             )
             self.assertEqual(
                 module.NODE_DISPLAY_NAME_MAPPINGS["JindouyunImageSwitch"],
-                "筋斗云图像尺寸判断",
+                "筋斗云-图像尺寸判断",
             )
         finally:
             sys.modules.pop(module_name, None)

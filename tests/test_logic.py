@@ -327,7 +327,11 @@ class Krea2RandomLoraLogicTests(unittest.TestCase):
             self.assertIn("JindouyunRandomLora", module.NODE_CLASS_MAPPINGS)
             self.assertEqual(
                 module.NODE_DISPLAY_NAME_MAPPINGS["JindouyunRandomLora"],
-                "筋斗云随机LORA",
+                "筋斗云-随机LoRA",
+            )
+            self.assertIn(
+                "筋斗云-随机LoRA",
+                module.NODE_CLASS_MAPPINGS["JindouyunRandomLora"].SEARCH_ALIASES,
             )
             self.assertEqual(
                 module.NODE_DISPLAY_NAME_MAPPINGS["JindouyunStringRouter"],
@@ -346,6 +350,26 @@ class Krea2RandomLoraLogicTests(unittest.TestCase):
             self.assertFalse(getattr(module.NODE_CLASS_MAPPINGS["JindouyunRandomLora"], "DEPRECATED", False))
             self.assertNotIn("筋斗云", module.NODE_DISPLAY_NAME_MAPPINGS["Krea2RandomLoraAuto"])
             self.assertNotIn("筋斗云", module.NODE_DISPLAY_NAME_MAPPINGS["Krea2RandomLoraModelOnly"])
+
+            branded_node_ids = (
+                "JindouyunCanvasComposite",
+                "JindouyunImageSwitch",
+                "JindouyunInteractiveCrop",
+                "JindouyunTransparentCrop",
+                "JindouyunShowAnything",
+                "JindouyunNumberSlider",
+                "JindouyunStringRouter",
+                "JindouyunLoadImage",
+                "JindouyunSaveImage",
+                "JindouyunRandomLora",
+                "NunchakuRandomLoraModelOnly",
+            )
+            for node_id in branded_node_ids:
+                self.assertTrue(module.NODE_DISPLAY_NAME_MAPPINGS[node_id].startswith("筋斗云-"))
+            self.assertEqual(
+                module.NODE_DISPLAY_NAME_MAPPINGS["NunchakuRandomLoraModelOnly"],
+                "筋斗云-Nunchaku随机LoRA",
+            )
 
             node_class = module.NODE_CLASS_MAPPINGS["JindouyunRandomLora"]
             self.assertEqual(
