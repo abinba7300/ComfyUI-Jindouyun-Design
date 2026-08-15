@@ -13,12 +13,12 @@ function ensureStyle() {
         #${BUTTON_ID} {
             position: fixed;
             right: 18px;
-            bottom: 18px;
+            bottom: 98px;
             z-index: 10000;
             border: 1px solid rgba(255, 255, 255, 0.22);
             border-radius: 6px;
             padding: 8px 12px;
-            background: #2f6fed;
+            background: #df6822;
             color: #fff;
             font-size: 13px;
             line-height: 1;
@@ -26,7 +26,7 @@ function ensureStyle() {
             box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
         }
         #${BUTTON_ID}:hover {
-            background: #3d7cff;
+            background: #f0782f;
         }
         #${BUTTON_ID}:disabled {
             cursor: wait;

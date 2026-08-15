@@ -25,6 +25,11 @@ class FolderDialogTests(unittest.TestCase):
         self.assertIn("$focusTimer.Dispose()", self.source)
         self.assertNotIn("New-Object JindouyunWindowOwner", self.source)
 
+    def test_open_folder_route_uses_explorer_without_shell_command_strings(self):
+        self.assertIn('async def open_local_folder(request):', self.source)
+        self.assertIn('["explorer.exe", str(folder)]', self.source)
+        self.assertIn('routes.post("/jindouyun_design/open_folder")', self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

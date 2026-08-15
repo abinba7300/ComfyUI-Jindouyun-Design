@@ -6,6 +6,8 @@ const DEFAULT_CROP = {version: 1, x: 0, y: 0, width: 1, height: 1};
 const HANDLE_SIZE = 10;
 const HANDLE_HIT_SIZE = 20;
 const MIN_CROP_PIXELS = 12;
+const UPLOAD_BUTTON_HEIGHT = 42;
+const CROP_PANEL_HEIGHT = 525;
 const RESIZE_METHODS = [
     "双三次 bicubic（推荐·通用）",
     "Lanczos（推荐·清晰锐利）",
@@ -517,6 +519,16 @@ function pointInRect(rect, x, y) {
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+function isFullCrop(crop) {
+    return crop.x <= 0.000001 && crop.y <= 0.000001
+        && crop.width >= 0.999999 && crop.height >= 0.999999;
+}
+
+function shouldCreateCropFromPointer(crop, rect, x, y, boxSelectArmed, forceCreate = false) {
+    if (forceCreate) return true;
+    return boxSelectArmed && (isFullCrop(crop) || !pointInRect(rect, x, y));
+}
+
 function pointerOnCanvas(canvas, event) {
     const bounds = canvas.getBoundingClientRect();
     return {
@@ -773,13 +785,13 @@ function openCropEditor(node, source) {
         ctx.restore();
 
         ctx.save();
-        ctx.strokeStyle = "#FFFFFF";
+        ctx.strokeStyle = "#7EE787";
         ctx.lineWidth = 2;
         ctx.strokeRect(rect.left, rect.top, rect.width, rect.height);
         for (const handle of cropHandles(rect)) {
-            ctx.fillStyle = "#FFFFFF";
-            ctx.strokeStyle = "#161A20";
-            ctx.lineWidth = 1;
+            ctx.fillStyle = "#15251B";
+            ctx.strokeStyle = "#7EE787";
+            ctx.lineWidth = 2;
             ctx.fillRect(handle.x - HANDLE_SIZE / 2, handle.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
             ctx.strokeRect(handle.x - HANDLE_SIZE / 2, handle.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
         }
@@ -948,7 +960,7 @@ function addCropControls(node) {
         gap: "5px",
         width: "100%",
         maxWidth: "100%",
-        height: "625px",
+        height: `${CROP_PANEL_HEIGHT}px`,
         padding: "5px 3px",
         boxSizing: "border-box",
         overflow: "hidden",
@@ -1218,19 +1230,21 @@ function addCropControls(node) {
     Object.assign(branchBadge.style, {
         height: "26px",
         borderRadius: "4px",
-        color: "#FFFFFF",
-        background: "#26734D",
+        color: "#8FF0A4",
+        background: "#20252B",
+        border: "1px solid #52C878",
         fontSize: "11px",
         lineHeight: "26px",
         textAlign: "center",
         whiteSpace: "nowrap",
+        boxSizing: "border-box",
     });
     splitRow.append(splitLabel, splitInputShell, branchBadge);
 
     const controlRow = document.createElement("div");
     Object.assign(controlRow.style, {
         display: "grid",
-        gridTemplateColumns: "44px minmax(0, 1fr) 58px",
+        gridTemplateColumns: "44px minmax(0, 1fr) 72px 58px",
         gap: "6px",
         alignItems: "center",
         height: "32px",
@@ -1265,9 +1279,11 @@ function addCropControls(node) {
         padding: "0 7px",
         fontSize: "12px",
     });
+    const boxSelectButton = makeButton("▣ 框选", "点击后可在图片任意位置拖出新的裁剪框；也可按住 Shift 直接拖动框选");
+    Object.assign(boxSelectButton.style, {width: "72px", height: "30px", padding: "0 5px"});
     const resetButton = makeButton("还原", "恢复为整张图片");
     Object.assign(resetButton.style, {width: "58px", height: "30px", padding: "0 7px"});
-    controlRow.append(ratioLabel, ratioSelect, resetButton);
+    controlRow.append(ratioLabel, ratioSelect, boxSelectButton, resetButton);
 
     const canvasShell = document.createElement("div");
     Object.assign(canvasShell.style, {
@@ -1283,6 +1299,135 @@ function addCropControls(node) {
         background: "#101318",
         boxSizing: "border-box",
     });
+    const previewWorkspace = document.createElement("div");
+    previewWorkspace.dataset.layout = "crop-side-tools";
+    Object.assign(previewWorkspace.style, {
+        display: "grid",
+        gridTemplateColumns: "86px minmax(140px, 1fr) 86px",
+        gap: "6px",
+        alignItems: "stretch",
+        width: "100%",
+        height: "338px",
+        minWidth: "0",
+        overflow: "hidden",
+        boxSizing: "border-box",
+    });
+    const makeToolRail = (side, title) => {
+        const rail = document.createElement("div");
+        rail.dataset.toolRail = side;
+        rail.title = title;
+        Object.assign(rail.style, {
+            display: "flex",
+            flexDirection: "column",
+            gap: "5px",
+            minWidth: "0",
+            height: "100%",
+            padding: "6px 5px",
+            border: "1px solid #414A56",
+            borderRadius: "4px",
+            background: "#171B21",
+            boxSizing: "border-box",
+            overflow: "hidden",
+        });
+        return rail;
+    };
+    const leftToolRail = makeToolRail("left", "旋转与镜像");
+    const rightToolRail = makeToolRail("right", "图片变形");
+
+    Object.assign(rotationRow.style, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "5px",
+        width: "100%",
+        height: "auto",
+        minWidth: "0",
+    });
+    Object.assign(rotationLabel.style, {
+        width: "100%",
+        height: "18px",
+        lineHeight: "18px",
+        color: "#D8DEE7",
+        fontWeight: "600",
+    });
+    const angleShell = document.createElement("label");
+    angleShell.title = "图片旋转角度";
+    Object.assign(angleShell.style, {
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) 14px",
+        alignItems: "center",
+        width: "100%",
+        height: "30px",
+        minWidth: "0",
+    });
+    Object.assign(rotationNumber.style, {height: "30px", padding: "0 4px", textAlign: "center"});
+    angleShell.append(rotationNumber, degreeLabel);
+    for (const button of [rotateLeftButton, rotateRightButton, resetRotationButton]) {
+        Object.assign(button.style, {width: "100%", height: "28px", padding: "0 2px", fontSize: "11px"});
+    }
+    rotationRow.replaceChildren(
+        rotationLabel,
+        angleShell,
+        rotateLeftButton,
+        rotateRightButton,
+        resetRotationButton,
+    );
+
+    Object.assign(mirrorRow.style, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "5px",
+        width: "100%",
+        height: "auto",
+        minWidth: "0",
+        marginTop: "4px",
+        paddingTop: "7px",
+        borderTop: "1px solid #38414C",
+    });
+    Object.assign(mirrorLabel.style, {
+        width: "100%",
+        height: "18px",
+        lineHeight: "18px",
+        color: "#D8DEE7",
+        fontWeight: "600",
+    });
+    for (const button of [mirrorHorizontalButton, mirrorVerticalButton]) {
+        Object.assign(button.style, {width: "100%", height: "28px", padding: "0 2px", fontSize: "11px"});
+    }
+    mirrorRow.replaceChildren(mirrorLabel, mirrorHorizontalButton, mirrorVerticalButton);
+    leftToolRail.append(rotationRow, mirrorRow);
+
+    Object.assign(transformRow.style, {
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+        width: "100%",
+        height: "auto",
+        minWidth: "0",
+    });
+    Object.assign(transformLabel.style, {
+        width: "100%",
+        height: "18px",
+        lineHeight: "18px",
+        color: "#D8DEE7",
+        fontWeight: "600",
+    });
+    for (const button of [aspectLockButton, resetTransformButton]) {
+        Object.assign(button.style, {width: "100%", height: "30px", padding: "0 2px", fontSize: "11px"});
+    }
+    for (const field of [widthField.shell, heightField.shell]) {
+        Object.assign(field.style, {
+            width: "100%",
+            gridTemplateColumns: "18px minmax(0, 1fr) 12px",
+        });
+    }
+    transformRow.replaceChildren(
+        transformLabel,
+        aspectLockButton,
+        resetTransformButton,
+        widthField.shell,
+        heightField.shell,
+    );
+    rightToolRail.append(transformRow);
     const canvas = document.createElement("canvas");
     Object.assign(canvas.style, {
         display: "none",
@@ -1317,6 +1462,7 @@ function addCropControls(node) {
         lineHeight: "20px",
     });
     canvasShell.append(canvas, transformHandleLayer, placeholder);
+    previewWorkspace.append(leftToolRail, canvasShell, rightToolRail);
 
     const status = document.createElement("span");
     Object.assign(status.style, {
@@ -1330,16 +1476,16 @@ function addCropControls(node) {
         textOverflow: "ellipsis",
     });
     node.__jindouyunCropStatus = status;
-    wrapper.append(maxEdgeGroup, rotationRow, mirrorRow, transformRow, splitRow, controlRow, canvasShell, status);
+    wrapper.append(maxEdgeGroup, splitRow, controlRow, previewWorkspace, status);
 
     const domWidget = node.addDOMWidget("交互裁剪", "jindouyun_interactive_crop", wrapper, {
         serialize: false,
         hideOnZoom: false,
-        getMinHeight: () => 625,
-        getMaxHeight: () => 625,
+        getMinHeight: () => CROP_PANEL_HEIGHT,
+        getMaxHeight: () => CROP_PANEL_HEIGHT,
     });
     syncCropPanelWidth(node, wrapper);
-    domWidget.computeSize = () => [syncCropPanelWidth(node, wrapper), 625];
+    domWidget.computeSize = () => [syncCropPanelWidth(node, wrapper), CROP_PANEL_HEIGHT];
     const originalOnResize = node.onResize;
     node.onResize = function() {
         originalOnResize?.apply(this, arguments);
@@ -1365,6 +1511,7 @@ function addCropControls(node) {
     let maxEdgeValue = Math.round(clamp(maxEdgeWidget?.value ?? 0, 0, 16384));
     let maxEdgeEnabled = widgetBooleanValue(maxEdgeEnabledWidget?.value ?? false);
     let interaction = null;
+    let boxSelectArmed = true;
     let transformInteraction = null;
     let loadToken = 0;
     let syncingRotationWidget = false;
@@ -1384,17 +1531,27 @@ function addCropControls(node) {
             [mirrorVerticalButton, mirrorVertical],
         ]) {
             button.setAttribute("aria-pressed", String(active));
-            button.style.background = active ? "#D96622" : "#252A31";
-            button.style.borderColor = active ? "#F59E0B" : "#48515D";
-            button.style.color = active ? "#FFFFFF" : "#F5F7FA";
+            button.style.background = "#252A31";
+            button.style.borderColor = active ? "#4EA1FF" : "#48515D";
+            button.style.color = active ? "#9DCEFF" : "#F5F7FA";
+        }
+    }
+
+    function syncPreviewTransformFromWidgets() {
+        if (mirrorAvailable) {
+            mirrorHorizontal = widgetBooleanValue(horizontalMirrorWidget?.value);
+            mirrorVertical = widgetBooleanValue(verticalMirrorWidget?.value);
+            refreshMirrorButtons();
         }
     }
 
     function refreshTransformControls() {
         aspectLockButton.textContent = aspectLocked ? "🔗 锁定" : "🔓 解锁";
         aspectLockButton.setAttribute("aria-pressed", String(aspectLocked));
-        aspectLockButton.style.background = aspectLocked ? "#D96622" : "#252A31";
-        aspectLockButton.style.borderColor = aspectLocked ? "#F59E0B" : "#48515D";
+        aspectLockButton.style.background = "#252A31";
+        aspectLockButton.style.borderColor = aspectLocked ? "#A78BFA" : "#6D5A91";
+        aspectLockButton.style.color = aspectLocked ? "#C4B5FD" : "#AFA0CA";
+        aspectLockButton.style.boxShadow = aspectLocked ? "inset 0 0 0 1px rgba(167,139,250,.18)" : "none";
         widthField.input.value = String(widthPercent);
         heightField.input.value = String(heightPercent);
         for (const handle of Object.values(transformHandles)) {
@@ -1417,8 +1574,9 @@ function addCropControls(node) {
     function refreshMaxEdgeToggle() {
         maxEdgeToggleButton.textContent = maxEdgeEnabled ? "最大边缩放：开启" : "最大边缩放：关闭";
         maxEdgeToggleButton.setAttribute("aria-pressed", String(maxEdgeEnabled));
-        maxEdgeToggleButton.style.background = maxEdgeEnabled ? "#26734D" : "#252A31";
-        maxEdgeToggleButton.style.borderColor = maxEdgeEnabled ? "#45A56F" : "#48515D";
+        maxEdgeToggleButton.style.background = "#252A31";
+        maxEdgeToggleButton.style.borderColor = maxEdgeEnabled ? "#52C878" : "#48515D";
+        maxEdgeToggleButton.style.color = maxEdgeEnabled ? "#8FF0A4" : "#F5F7FA";
     }
 
     function updateMaxEdgeEnabled(value, {fromWidget = false} = {}) {
@@ -1523,6 +1681,17 @@ function addCropControls(node) {
         ratioSelect.value = match?.[0] || "free";
     }
 
+    function setBoxSelectArmed(active) {
+        boxSelectArmed = Boolean(active);
+        boxSelectButton.textContent = boxSelectArmed ? "▣ 框选中" : "▣ 框选";
+        boxSelectButton.style.background = "#252A31";
+        boxSelectButton.style.borderColor = boxSelectArmed ? "#7EE787" : "#48515D";
+        boxSelectButton.style.color = boxSelectArmed ? "#A7F3B4" : "#F5F7FA";
+        boxSelectButton.style.boxShadow = boxSelectArmed ? "inset 0 0 0 1px rgba(126,231,135,.16)" : "none";
+        boxSelectButton.setAttribute("aria-pressed", String(boxSelectArmed));
+        canvas.style.cursor = boxSelectArmed ? "crosshair" : "default";
+    }
+
     function activeHandles(rect) {
         const handles = cropHandles(rect);
         return ratioLock ? handles.filter((handle) => handle.name.length === 2) : handles;
@@ -1562,7 +1731,10 @@ function addCropControls(node) {
                 ? "符合尺寸"
                 : "不符合尺寸";
             branchBadge.textContent = branch;
-            branchBadge.style.background = branch === "符合尺寸" ? "#26734D" : "#A64B20";
+            const branchMatches = branch === "符合尺寸";
+            branchBadge.style.background = "#20252B";
+            branchBadge.style.borderColor = branchMatches ? "#52C878" : "#F472B6";
+            branchBadge.style.color = branchMatches ? "#8FF0A4" : "#F9A8D4";
             const rotationText = rotation ? ` · 旋转 ${rotation}°` : "";
             const mirrorText = mirrorHorizontal && mirrorVertical
                 ? " · 左右+上下镜像"
@@ -1725,13 +1897,13 @@ function addCropControls(node) {
         ctx.restore();
 
         ctx.save();
-        ctx.strokeStyle = "#FFFFFF";
+        ctx.strokeStyle = "#7EE787";
         ctx.lineWidth = 2;
         ctx.strokeRect(rect.left, rect.top, rect.width, rect.height);
         for (const handle of activeHandles(rect)) {
-            ctx.fillStyle = "#FFFFFF";
-            ctx.strokeStyle = "#11151A";
-            ctx.lineWidth = 1;
+            ctx.fillStyle = "#15251B";
+            ctx.strokeStyle = "#7EE787";
+            ctx.lineWidth = 2;
             ctx.fillRect(handle.x - HANDLE_SIZE / 2, handle.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
             ctx.strokeRect(handle.x - HANDLE_SIZE / 2, handle.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
         }
@@ -1741,19 +1913,19 @@ function addCropControls(node) {
             const rotationHandle = rotationHandlePosition();
             ctx.save();
             ctx.setLineDash([4, 4]);
-            ctx.strokeStyle = "rgba(245, 158, 11, 0.35)";
+            ctx.strokeStyle = "rgba(78, 161, 255, 0.42)";
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(canvas.width / 2, canvas.height / 2);
             ctx.lineTo(rotationHandle.x, rotationHandle.y);
             ctx.stroke();
             ctx.setLineDash([]);
-            ctx.fillStyle = "#F59E0B";
+            ctx.fillStyle = "#4EA1FF";
             ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.arc(rotationHandle.x, rotationHandle.y, rotationHandle.radius, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = "#FFF7E6";
+            ctx.strokeStyle = "#DCEEFF";
             ctx.lineWidth = 1;
             ctx.stroke();
             ctx.restore();
@@ -1803,6 +1975,7 @@ function addCropControls(node) {
             if (!nextSourceDimensions) throw new Error("无法获取图片尺寸。");
             source = nextSource;
             sourceDimensionsValue = nextSourceDimensions;
+            syncPreviewTransformFromWidgets();
             updateRotation(rotationWidget?.value, {fromWidget: true});
             node.imgs = null;
             canvas.style.display = "block";
@@ -1829,25 +2002,41 @@ function addCropControls(node) {
         event.stopPropagation();
         const pointer = pointerOnCanvas(canvas, event);
         const rect = cropRect(crop, canvas);
-        if (hitRotationHandle(pointer.x, pointer.y)) {
+        const handle = hitActiveHandle(rect, pointer.x, pointer.y);
+        if (!event.shiftKey && hitRotationHandle(pointer.x, pointer.y)) {
             interaction = {
                 mode: "rotate",
                 rotation,
                 startAngle: Math.atan2(pointer.y - canvas.height / 2, pointer.x - canvas.width / 2),
             };
             canvas.style.cursor = "grabbing";
+        } else if (!event.shiftKey && handle) {
+            interaction = {mode: "resize", handle: handle.name, start: {...crop}, pointer};
+        } else if (shouldCreateCropFromPointer(
+            crop,
+            rect,
+            pointer.x,
+            pointer.y,
+            boxSelectArmed,
+            event.shiftKey,
+        )) {
+            const x = clamp(pointer.x / canvas.width, 0, 1);
+            const y = clamp(pointer.y / canvas.height, 0, 1);
+            interaction = {
+                mode: "create",
+                startX: x,
+                startY: y,
+                previous: {...crop},
+            };
+            crop = {version: 1, x, y, width: 0, height: 0};
+        } else if (pointInRect(rect, pointer.x, pointer.y)) {
+            interaction = {mode: "move", start: {...crop}, pointer};
         } else {
-            const handle = hitActiveHandle(rect, pointer.x, pointer.y);
-            if (handle) {
-                interaction = {mode: "resize", handle: handle.name, start: {...crop}, pointer};
-            } else if (pointInRect(rect, pointer.x, pointer.y)) {
-                interaction = {mode: "move", start: {...crop}, pointer};
-            } else {
-                const x = pointer.x / canvas.width;
-                const y = pointer.y / canvas.height;
-                crop = {version: 1, x, y, width: 0, height: 0};
-                interaction = {mode: "create", startX: x, startY: y};
-            }
+            const x = pointer.x / canvas.width;
+            const y = pointer.y / canvas.height;
+            const previous = {...crop};
+            crop = {version: 1, x, y, width: 0, height: 0};
+            interaction = {mode: "create", startX: x, startY: y, previous};
         }
         canvas.setPointerCapture?.(event.pointerId);
         renderInline();
@@ -1863,7 +2052,7 @@ function addCropControls(node) {
                 ? (handle.name === "n" || handle.name === "s" ? "ns-resize"
                     : handle.name === "e" || handle.name === "w" ? "ew-resize"
                     : handle.name === "ne" || handle.name === "sw" ? "nesw-resize" : "nwse-resize")
-                : pointInRect(rect, pointer.x, pointer.y) ? "move" : "crosshair";
+                : pointInRect(rect, pointer.x, pointer.y) && !isFullCrop(crop) ? "move" : "crosshair";
             return;
         }
         event.preventDefault();
@@ -1907,10 +2096,25 @@ function addCropControls(node) {
         if (!interaction) return;
         event.preventDefault();
         event.stopPropagation();
-        const mode = interaction.mode;
+        const completed = interaction;
+        const mode = completed.mode;
+        if (mode === "create") {
+            if (event.type === "pointercancel") {
+                crop = completed.previous;
+            } else {
+                const pointer = pointerOnCanvas(canvas, event);
+                const distance = Math.hypot(
+                    pointer.x - completed.startX * canvas.width,
+                    pointer.y - completed.startY * canvas.height,
+                );
+                crop = distance >= 3
+                    ? cropFromDrag(completed.startX, completed.startY, pointer.x, pointer.y)
+                    : completed.previous;
+            }
+        }
         interaction = null;
         canvas.releasePointerCapture?.(event.pointerId);
-        if (mode !== "rotate") commitCrop();
+        if (mode !== "rotate" && event.type !== "pointercancel") commitCrop();
         renderInline();
     };
     canvas.addEventListener("pointerup", finishInteraction);
@@ -1964,6 +2168,7 @@ function addCropControls(node) {
         commitCrop();
         renderInline();
     });
+    boxSelectButton.addEventListener("click", () => setBoxSelectArmed(!boxSelectArmed));
     resetButton.addEventListener("click", () => {
         crop = {...DEFAULT_CROP};
         commitCrop();
@@ -2083,7 +2288,7 @@ function addCropControls(node) {
         event.preventDefault();
         event.stopPropagation();
         if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-        wrapper.style.outline = "2px solid #F59E0B";
+        wrapper.style.outline = "2px solid #52C878";
         wrapper.style.outlineOffset = "-2px";
     });
     wrapper.addEventListener("dragleave", (event) => {
@@ -2116,13 +2321,14 @@ function addCropControls(node) {
         renderInline();
     };
     syncRatioSelect();
+    setBoxSelectArmed(true);
     refreshMirrorButtons();
     refreshMaxEdgeToggle();
     updateAspectLock(aspectLocked);
     updateSplitThreshold(splitThreshold, {fromWidget: true});
     updateCropStatus(node);
     requestAnimationFrame(refreshSource);
-    node.setSize?.([Math.max(node.size?.[0] || 340, 380), Math.max((node.size?.[1] || 150) + 625, 755)]);
+    node.setSize?.([Math.max(node.size?.[0] || 340, 380), Math.max((node.size?.[1] || 150) + CROP_PANEL_HEIGHT, 655)]);
     requestAnimationFrame(() => syncCropPanelWidth(node, wrapper));
     window.setTimeout(() => syncCropPanelWidth(node, wrapper), 120);
 }
@@ -2151,6 +2357,77 @@ function patchUploadWidget(node) {
         previousValue = currentValue;
         window.setTimeout(() => node.__jindouyunRefreshInlineCrop?.(), 0);
     };
+}
+
+function patchUploadButton(node) {
+    const widgets = node.widgets || [];
+    const widget = widgets.find((item) => (
+        item.type === "button"
+        || item.constructor?.name === "ButtonWidget"
+        || /选择.*上传|choose.*upload/i.test(String(item.label || ""))
+    ));
+    if (!widget) {
+        const retryCount = Number(node.__jindouyunUploadButtonRetryCount || 0);
+        if (!node.__jindouyunUploadButtonRetry && retryCount < 120) {
+            node.__jindouyunUploadButtonRetryCount = retryCount + 1;
+            node.__jindouyunUploadButtonRetry = window.setTimeout(() => {
+                node.__jindouyunUploadButtonRetry = null;
+                patchUploadButton(node);
+            }, 100);
+        }
+        return;
+    }
+    if (widget.__jindouyunUploadButtonPatched) return;
+    node.__jindouyunUploadButtonRetryCount = 0;
+    widget.__jindouyunUploadButtonPatched = true;
+    widget.label = "选择要上传的图片";
+    widget.computeSize = (width) => [Number(width) || Number(node.size?.[0]) || 380, UPLOAD_BUTTON_HEIGHT];
+    widget.draw = function(ctx, currentNode, width, y, _height, lowQuality) {
+        const left = 12;
+        const top = y + 2;
+        const buttonWidth = Math.max(0, width - left * 2);
+        const buttonHeight = UPLOAD_BUTTON_HEIGHT - 4;
+        const hovered = currentNode?.mouseOver?.overWidget === widget;
+        const pressed = Boolean(widget.clicked);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(left, top, buttonWidth, buttonHeight, 6);
+        ctx.fillStyle = pressed ? "#1F6B43" : hovered ? "#3EAF72" : "#2E8B57";
+        ctx.fill();
+        ctx.strokeStyle = hovered ? "#9AF0B8" : "#61C98A";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        if (!lowQuality) {
+            const centerX = width / 2;
+            const iconX = Math.max(left + 18, centerX - 79);
+            const iconY = top + buttonHeight / 2;
+            ctx.strokeStyle = "#FFFFFF";
+            ctx.lineWidth = 2;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.beginPath();
+            ctx.moveTo(iconX, iconY + 5);
+            ctx.lineTo(iconX, iconY - 6);
+            ctx.moveTo(iconX - 4, iconY - 2);
+            ctx.lineTo(iconX, iconY - 6);
+            ctx.lineTo(iconX + 4, iconY - 2);
+            ctx.moveTo(iconX - 6, iconY + 5);
+            ctx.lineTo(iconX + 6, iconY + 5);
+            ctx.stroke();
+
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "600 14px Arial, sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(widget.label, centerX + 8, iconY + 1);
+        }
+        ctx.restore();
+        if (pressed) widget.clicked = false;
+    };
+
+    node.graph?.setDirtyCanvas?.(true, true);
 }
 
 function patchMaxEdgeWidget(node) {
@@ -2261,6 +2538,7 @@ function patchCropNode(node) {
     hideTransformWidgets(node);
     patchNativeImagePreview(node);
     patchUploadWidget(node);
+    patchUploadButton(node);
     patchWholeNodeImageDrop(node);
     patchMaxEdgeWidget(node);
     patchMaxEdgeEnabledWidget(node);

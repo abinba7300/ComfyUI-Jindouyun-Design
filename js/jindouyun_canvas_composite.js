@@ -1,8 +1,9 @@
 import { app } from "../../scripts/app.js";
 import {
     CANVAS_PERCENT_MAX,
-    fitLayerToPreview,
     normalizeScaleMode,
+    resolvePreviewArea,
+    resolvePreviewWidgetHeight,
     resizeLayerFromCorner,
     resolveLayerSize,
     scaleValuesFromPreview,
@@ -10,14 +11,18 @@ import {
     SCALE_MODE_HEIGHT,
     SCALE_MODE_MANUAL,
     SCALE_MODE_WIDTH,
-} from "./jindouyun_canvas_geometry.mjs?v=20260721-groups4";
+} from "./jindouyun_canvas_geometry.mjs?v=20260815-canvas-overflow1";
+import {
+    hueSliderColorAt,
+    hueSliderPositionForColor,
+} from "./jindouyun_color_slider.mjs?v=20260814-direct-color-slider1";
 
 const NODE_TYPE = "JindouyunCanvasComposite";
 const SNAP_DISTANCE = 2.5;
-const POSITION_WIDGET_HEIGHT = 230;
+const POSITION_WIDGET_MIN_HEIGHT = 230;
+const POSITION_WIDGET_MAX_HEIGHT = 560;
 const RESIZE_HANDLE_SIZE = 8;
 const RESIZE_HIT_SIZE = 14;
-let colorPickerInput = null;
 
 function findWidget(node, name) {
     return node.widgets?.find((widget) => widget.name === name);
@@ -60,10 +65,10 @@ function axisPercentLimits(areaSize, layerSize) {
     return {min: 100 - half, max: half};
 }
 
-function layerPreviewRect(node, widgetWidth, y) {
+function layerPreviewRect(node, widgetWidth, y, widgetHeight = POSITION_WIDGET_MIN_HEIGHT) {
     const xWidget = findWidget(node, "图片X");
     const yWidget = findWidget(node, "图片Y");
-    const geometry = computePreviewRects(node, widgetWidth, y);
+    const geometry = computePreviewRects(node, widgetWidth, y, widgetHeight);
     const xLimits = axisCenterLimits(geometry.areaX, geometry.areaW, geometry.layerW);
     const yLimits = axisCenterLimits(geometry.areaY, geometry.areaH, geometry.layerH);
     const centerX = Math.max(
@@ -94,11 +99,20 @@ function resizeHandles(rect) {
     ];
 }
 
+function visibleResizeHandles(rect) {
+    const inset = RESIZE_HANDLE_SIZE / 2;
+    return resizeHandles(rect).map((handle) => ({
+        ...handle,
+        displayX: Math.max(rect.areaX + inset, Math.min(rect.areaX + rect.areaW - inset, handle.x)),
+        displayY: Math.max(rect.areaY + inset, Math.min(rect.areaY + rect.areaH - inset, handle.y)),
+    }));
+}
+
 function hitResizeHandle(rect, x, y) {
     const half = RESIZE_HIT_SIZE / 2;
-    return resizeHandles(rect).find((handle) =>
-        x >= handle.x - half && x <= handle.x + half &&
-        y >= handle.y - half && y <= handle.y + half
+    return visibleResizeHandles(rect).find((handle) =>
+        x >= handle.displayX - half && x <= handle.displayX + half &&
+        y >= handle.displayY - half && y <= handle.displayY + half
     );
 }
 
@@ -265,34 +279,6 @@ function drawSavedDrawingPreview(ctx, node, areaX, areaY, areaW, areaH) {
     ctx.restore();
 }
 
-function getColorPickerInput() {
-    if (colorPickerInput) {
-        return colorPickerInput;
-    }
-    colorPickerInput = document.createElement("input");
-    colorPickerInput.type = "color";
-    colorPickerInput.style.position = "fixed";
-    colorPickerInput.style.left = "-100px";
-    colorPickerInput.style.top = "-100px";
-    colorPickerInput.style.width = "1px";
-    colorPickerInput.style.height = "1px";
-    colorPickerInput.style.opacity = "0";
-    document.body.appendChild(colorPickerInput);
-    return colorPickerInput;
-}
-
-function openColorPicker(widget, node) {
-    const input = getColorPickerInput();
-    input.value = normalizeHexColor(widget.value);
-    input.oninput = () => {
-        setWidgetValue(widget, normalizeHexColor(input.value), node);
-        syncColorDom(node);
-        app.graph.setDirtyCanvas(true, true);
-    };
-    input.onchange = input.oninput;
-    input.click();
-}
-
 function syncColorDom(node) {
     const colorWidget = findWidget(node, "背景颜色");
     const input = node.__jindouyunColorNativeInput;
@@ -304,6 +290,10 @@ function syncColorDom(node) {
     }
     if (chip) {
         chip.style.background = color;
+        const position = Number.isFinite(node.__jindouyunColorSliderPosition)
+            ? node.__jindouyunColorSliderPosition
+            : hueSliderPositionForColor(color, 0.5);
+        chip.style.left = `${position * 100}%`;
     }
     if (text) {
         text.textContent = color;
@@ -365,7 +355,7 @@ function getPreviewImageDimensions(node) {
     return {width: ratio * 1000, height: 1000};
 }
 
-function updateImageRatioFromInput(node) {
+function getInputPreviewSource(node) {
     const imageInput = node.inputs?.find((input) => input.name === "图像");
     const link = imageInput?.link != null ? app.graph.links[imageInput.link] : null;
     const originNode = link ? app.graph.getNodeById(link.origin_id) : null;
@@ -375,45 +365,43 @@ function updateImageRatioFromInput(node) {
         originNode?.preview,
         originNode?.canvas,
     ];
-    for (const candidate of candidates) {
-        if (!candidate) {
-            continue;
-        }
+    return candidates.find((candidate) => {
+        const width = candidate?.naturalWidth || candidate?.videoWidth || candidate?.width;
+        const height = candidate?.naturalHeight || candidate?.videoHeight || candidate?.height;
+        return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0;
+    }) || null;
+}
+
+function updateImageRatioFromInput(node) {
+    const candidate = getInputPreviewSource(node);
+    if (candidate) {
         const width = candidate.naturalWidth || candidate.videoWidth || candidate.width;
         const height = candidate.naturalHeight || candidate.videoHeight || candidate.height;
-        if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
-            const nextRatio = width / height;
-            node.__jindouyunImageWidth = width;
-            node.__jindouyunImageHeight = height;
-            if (Math.abs((node.__jindouyunImageRatio || 0) - nextRatio) > 0.001) {
-                node.__jindouyunImageRatio = nextRatio;
-                app.graph.setDirtyCanvas(true, true);
-            }
-            return true;
+        const nextRatio = width / height;
+        node.__jindouyunImageWidth = width;
+        node.__jindouyunImageHeight = height;
+        if (Math.abs((node.__jindouyunImageRatio || 0) - nextRatio) > 0.001) {
+            node.__jindouyunImageRatio = nextRatio;
+            app.graph.setDirtyCanvas(true, true);
         }
+        return true;
     }
     return false;
 }
 
-function computePreviewRects(node, widgetWidth, y) {
-    const outerX = 16;
-    const outerY = y + 8;
-    const outerW = Math.max(80, (node.size?.[0] || widgetWidth || 420) - 32);
-    const outerH = POSITION_WIDGET_HEIGHT - 16;
-    const canvasRatio = getCanvasRatio(node);
-
-    let areaW = outerW;
-    let areaH = outerW / canvasRatio;
-    if (areaH > outerH) {
-        areaH = outerH;
-        areaW = outerH * canvasRatio;
-    }
-    const areaX = outerX + (outerW - areaW) / 2;
-    const areaY = outerY + (outerH - areaH) / 2;
-
+function computePreviewRects(node, widgetWidth, y, widgetHeight = POSITION_WIDGET_MIN_HEIGHT) {
     const image = getPreviewImageDimensions(node);
-    const imageRatio = image.width / image.height;
     const canvas = getCanvasDimensions(node);
+    const previewArea = resolvePreviewArea({
+        widgetWidth: node.size?.[0] || widgetWidth || 420,
+        widgetHeight,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+    });
+    const areaX = previewArea.x;
+    const areaY = y + previewArea.y;
+    const areaW = previewArea.width;
+    const areaH = previewArea.height;
     const scaleMode = normalizeScaleMode(findWidget(node, "缩放方式")?.value);
     const target = resolveLayerSize({
         imageWidth: image.width,
@@ -424,14 +412,55 @@ function computePreviewRects(node, widgetWidth, y) {
         scaleMode,
         canvasPercent: findWidget(node, "画布占比")?.value,
     });
-    let layerW = target.width / canvas.width * areaW;
-    let layerH = target.height / canvas.height * areaH;
-
-    const previewLayer = fitLayerToPreview(layerW, layerH, areaW, areaH);
-    layerW = Math.max(16, previewLayer.width);
-    layerH = Math.max(16, previewLayer.height);
+    const layerW = Math.max(16, target.width / canvas.width * areaW);
+    const layerH = Math.max(16, target.height / canvas.height * areaH);
 
     return {areaX, areaY, areaW, areaH, layerW, layerH};
+}
+
+function preferredPreviewHeight(node, widgetWidth) {
+    const canvas = getCanvasDimensions(node);
+    return resolvePreviewWidgetHeight({
+        widgetWidth: node.size?.[0] || widgetWidth || 360,
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        minHeight: POSITION_WIDGET_MIN_HEIGHT,
+        maxHeight: POSITION_WIDGET_MAX_HEIGHT,
+    });
+}
+
+function previewCanvasBlendMode(mode) {
+    const normalized = String(mode || "normal").replaceAll(" ", "-");
+    const supported = new Set([
+        "multiply", "screen", "overlay", "darken", "lighten", "color-dodge",
+        "color-burn", "hard-light", "soft-light", "difference", "exclusion",
+        "hue", "saturation", "color", "luminosity",
+    ]);
+    return supported.has(normalized) ? normalized : "source-over";
+}
+
+function drawInputImagePreview(ctx, node, rect) {
+    if (!isPreviewInputVisible(node)) return false;
+    const source = getInputPreviewSource(node);
+    if (!source) return false;
+    const rotation = clampNumber(findWidget(node, "图片旋转")?.value, -180, 180, 0);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rect.areaX, rect.areaY, rect.areaW, rect.areaH);
+    ctx.clip();
+    ctx.globalAlpha = clampNumber(findWidget(node, "透明度")?.value, 0, 1, 1);
+    ctx.globalCompositeOperation = previewCanvasBlendMode(findWidget(node, "混合模式")?.value);
+    try {
+        ctx.translate(rect.centerX, rect.centerY);
+        ctx.rotate(rotation * Math.PI / 180);
+        ctx.drawImage(source, -rect.layerW / 2, -rect.layerH / 2, rect.layerW, rect.layerH);
+    } catch (_) {
+        ctx.restore();
+        return false;
+    }
+    ctx.restore();
+    return true;
 }
 
 function applyRatioPreset(node) {
@@ -498,7 +527,8 @@ function addColorPickerDomWidget(node) {
 
     const bar = document.createElement("button");
     bar.type = "button";
-    bar.title = "选择背景颜色";
+    bar.title = "按住白点或彩色条左右拖动，实时选择背景颜色";
+    bar.setAttribute("aria-label", "拖动选择背景颜色");
     bar.style.flex = "1";
     bar.style.minWidth = "120px";
     bar.style.height = "24px";
@@ -506,6 +536,7 @@ function addColorPickerDomWidget(node) {
     bar.style.border = "1px solid #777";
     bar.style.borderRadius = "4px";
     bar.style.cursor = "pointer";
+    bar.style.touchAction = "none";
     bar.style.position = "relative";
     bar.style.overflow = "hidden";
     bar.style.background = "linear-gradient(90deg, #ff0000 0%, #ffff00 16%, #00ff00 33%, #00ffff 50%, #0000ff 66%, #ff00ff 83%, #ff0000 100%)";
@@ -529,20 +560,68 @@ function addColorPickerDomWidget(node) {
     text.style.fontSize = "12px";
     text.style.minWidth = "70px";
     text.style.textAlign = "right";
+    text.style.cursor = "pointer";
+    text.title = "点击色号可精确选择白色、灰色或自定义颜色";
+    text.setAttribute("role", "button");
 
-    const onColorChange = () => {
-        const color = normalizeHexColor(input.value);
+    const applyColor = (value) => {
+        const color = normalizeHexColor(value);
+        input.value = color;
         setWidgetValue(colorWidget, color, node);
         text.textContent = color;
+        chip.style.background = color;
         app.graph.setDirtyCanvas(true, true);
     };
+    const onColorChange = () => applyColor(input.value);
     input.addEventListener("input", onColorChange);
     input.addEventListener("change", onColorChange);
-
-    bar.addEventListener("click", (event) => {
+    text.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         input.click();
+    });
+
+    let dragging = false;
+    const updateFromPointer = (event) => {
+        const rect = bar.getBoundingClientRect();
+        if (rect.width <= 0) {
+            return;
+        }
+        const position = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+        node.__jindouyunColorSliderPosition = position;
+        chip.style.left = `${position * 100}%`;
+        applyColor(hueSliderColorAt(position));
+    };
+    bar.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        dragging = true;
+        bar.setPointerCapture?.(event.pointerId);
+        updateFromPointer(event);
+    });
+    bar.addEventListener("pointermove", (event) => {
+        if (!dragging) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        updateFromPointer(event);
+    });
+    const finishDragging = (event) => {
+        if (!dragging) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        updateFromPointer(event);
+        dragging = false;
+        if (bar.hasPointerCapture?.(event.pointerId)) {
+            bar.releasePointerCapture(event.pointerId);
+        }
+    };
+    bar.addEventListener("pointerup", finishDragging);
+    bar.addEventListener("pointercancel", () => {
+        dragging = false;
     });
 
     wrapper.append(label, bar, input, text);
@@ -644,13 +723,18 @@ function addPositionWidget(node) {
         name: "位置画布",
         type: "jindouyun_canvas_position",
         value: "",
-        draw(ctx, node, widgetWidth, y) {
+        draw(ctx, node, widgetWidth, y, allocatedHeight) {
             widget.last_y = y;
+            widget.last_height = Math.max(
+                preferredPreviewHeight(node, widgetWidth),
+                Number(allocatedHeight) || 0,
+                Number(node.size?.[1] || 0) - y - 8,
+            );
             const inputVisible = isPreviewInputVisible(node);
             const xWidget = findWidget(node, "图片X");
             const yWidget = findWidget(node, "图片Y");
             const colorWidget = findWidget(node, "背景颜色");
-            const rect = layerPreviewRect(node, widgetWidth, y);
+            const rect = layerPreviewRect(node, widgetWidth, y, widget.last_height);
             const {areaX, areaY, areaW, areaH, layerW, layerH} = rect;
             const centerX = areaX + areaW / 2;
             const centerY = areaY + areaH / 2;
@@ -668,6 +752,8 @@ function addPositionWidget(node) {
             }
             ctx.fill();
             ctx.stroke();
+
+            drawInputImagePreview(ctx, node, rect);
 
             const snappedX = Math.abs((Number(xWidget?.value ?? 50)) - 50) <= SNAP_DISTANCE;
             const snappedY = Math.abs((Number(yWidget?.value ?? 50)) - 50) <= SNAP_DISTANCE;
@@ -694,26 +780,26 @@ function addPositionWidget(node) {
             ctx.beginPath();
             ctx.rect(areaX, areaY, areaW, areaH);
             ctx.clip();
-            ctx.fillStyle = "rgba(40, 120, 255, 0.22)";
+            ctx.fillStyle = "rgba(40, 120, 255, 0.07)";
             ctx.strokeStyle = "#2878ff";
             ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.rect(px - layerW / 2, py - layerH / 2, layerW, layerH);
             ctx.fill();
             ctx.stroke();
-            for (const handle of resizeHandles(rect)) {
+            for (const handle of visibleResizeHandles(rect)) {
                 ctx.fillStyle = "#FFFFFF";
                 ctx.strokeStyle = "#2878ff";
                 ctx.lineWidth = 1.5;
                 ctx.fillRect(
-                    handle.x - RESIZE_HANDLE_SIZE / 2,
-                    handle.y - RESIZE_HANDLE_SIZE / 2,
+                    handle.displayX - RESIZE_HANDLE_SIZE / 2,
+                    handle.displayY - RESIZE_HANDLE_SIZE / 2,
                     RESIZE_HANDLE_SIZE,
                     RESIZE_HANDLE_SIZE,
                 );
                 ctx.strokeRect(
-                    handle.x - RESIZE_HANDLE_SIZE / 2,
-                    handle.y - RESIZE_HANDLE_SIZE / 2,
+                    handle.displayX - RESIZE_HANDLE_SIZE / 2,
+                    handle.displayY - RESIZE_HANDLE_SIZE / 2,
                     RESIZE_HANDLE_SIZE,
                     RESIZE_HANDLE_SIZE,
                 );
@@ -729,7 +815,12 @@ function addPositionWidget(node) {
         mouse(event, pos, node) {
             const xWidget = findWidget(node, "图片X");
             const yWidget = findWidget(node, "图片Y");
-            const rect = layerPreviewRect(node, node.size?.[0] || 420, widget.last_y || 0);
+            const rect = layerPreviewRect(
+                node,
+                node.size?.[0] || 420,
+                widget.last_y || 0,
+                widget.last_height || POSITION_WIDGET_MIN_HEIGHT,
+            );
             const {areaX, areaY, areaW, areaH, layerW, layerH} = rect;
             const isDown = event.type === "pointerdown" || event.type === "mousedown";
             const isUp = event.type === "pointerup" || event.type === "mouseup";
@@ -786,13 +877,37 @@ function addPositionWidget(node) {
             app.graph.setDirtyCanvas(true, true);
             return true;
         },
-        computeSize() {
-            return [node.size?.[0] || 360, POSITION_WIDGET_HEIGHT];
+        computeSize(width) {
+            return [width || node.size?.[0] || 360, preferredPreviewHeight(node, width)];
+        },
+        computeLayoutSize(ownerNode) {
+            const height = preferredPreviewHeight(ownerNode, ownerNode.size?.[0]);
+            return {minHeight: height, maxHeight: height, minWidth: 0};
         },
     };
 
     node.widgets.push(widget);
-    node.setSize?.([Math.max(node.size?.[0] || 320, 360), (node.size?.[1] || 300) + POSITION_WIDGET_HEIGHT]);
+    node.setSize?.([
+        Math.max(node.size?.[0] || 320, 360),
+        (node.size?.[1] || 300) + preferredPreviewHeight(node, node.size?.[0]),
+    ]);
+}
+
+function repairInflatedCanvasNode(node) {
+    if (node.__jindouyunCanvasSizeRepairPending || !node.computeSize) return;
+    node.__jindouyunCanvasSizeRepairPending = true;
+    window.requestAnimationFrame(() => {
+        node.__jindouyunCanvasSizeRepairPending = false;
+        const minimum = node.computeSize?.();
+        const minimumHeight = Number(minimum?.[1] || 0);
+        const currentHeight = Number(node.size?.[1] || 0);
+        if (!Number.isFinite(minimumHeight) || !Number.isFinite(currentHeight)) return;
+        const runawayThreshold = Math.max(minimumHeight * 2, minimumHeight + 800);
+        if (currentHeight > runawayThreshold) {
+            node.setSize?.([Math.max(360, Number(node.size?.[0] || 360)), minimumHeight]);
+            node.setDirtyCanvas?.(true, true);
+        }
+    });
 }
 
 function patchCanvasNode(node) {
@@ -806,12 +921,17 @@ function patchCanvasNode(node) {
     patchScaleWidgets(node);
     patchImageInputRatio(node);
     addPositionWidget(node);
+    repairInflatedCanvasNode(node);
 }
 
 app.registerExtension({
     name: "comfyui-jindouyun-design.canvas-composite",
 
     nodeCreated(node) {
+        patchCanvasNode(node);
+    },
+
+    loadedGraphNode(node) {
         patchCanvasNode(node);
     },
 

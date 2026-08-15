@@ -4,8 +4,36 @@ import vm from "node:vm";
 
 const drawingPath = new URL("../js/jindouyun_canvas_drawing.js", import.meta.url);
 const source = await fs.readFile(drawingPath, "utf8");
+const compositeSource = await fs.readFile(
+    new URL("../js/jindouyun_canvas_composite.js", import.meta.url),
+    "utf8",
+);
+const compositeRuntimeSource = await fs.readFile(
+    new URL("../js/jindouyun_canvas_composite_runtime2.js", import.meta.url),
+    "utf8",
+);
+assert.match(compositeRuntimeSource, /jindouyun_canvas_composite\.js\?v=20260815-canvas-overflow1/);
+assert.match(compositeSource, /function drawInputImagePreview/);
+assert.match(compositeSource, /ctx\.drawImage\(source/);
+assert.match(compositeSource, /computeLayoutSize/);
+assert.match(compositeSource, /maxHeight:\s*height/);
+assert.match(compositeSource, /resolvePreviewArea/);
+assert.match(compositeSource, /resolvePreviewWidgetHeight/);
+assert.doesNotMatch(compositeSource, /computeSize\(\)\s*\{[\s\S]{0,300}remainingHeight/);
+assert.match(compositeSource, /loadedGraphNode\(node\)/);
+assert.match(compositeSource, /Number\(node\.size\?\.\[1\] \|\| 0\) - y - 8/);
+assert.match(compositeSource, /jindouyun_canvas_geometry\.mjs\?v=20260815-canvas-overflow1/);
 assert.match(source, /曲线优化：开/);
 assert.match(source, /smoothingStrength: 50/);
+assert.match(source, /smartRegularize: false/);
+assert.match(source, /smartRegularize: parsed\.smartRegularize === true/);
+assert.match(source, /regularizeSensitivity: 50/);
+assert.match(source, /智能规整：开/);
+assert.match(source, /识别灵敏度/);
+assert.match(source, /regularizeStrokePoints/);
+assert.match(source, /已规整为/);
+assert.match(source, /智能直线/);
+assert.match(source, /智能圆弧/);
 assert.match(source, /优化全部/);
 assert.match(source, /优化选中/);
 assert.match(source, /选择线条/);
@@ -27,7 +55,7 @@ assert.match(source, /sizeInput\.min = "2"/);
 assert.match(source, /sizeInput\.max = "20"/);
 assert.match(source, /customSizeInput\.max = "5000"/);
 assert.match(source, /decorateIconButton\(runButton, "▶", "保存并运行"\)/);
-assert.match(source, /let queueCount = Math\.round\(clamp\(node\.__jindouyunQueueCount \?\? 2, 1, 999\)\)/);
+assert.match(source, /let queueCount = Math\.round\(clamp\(node\.__jindouyunQueueCount \?\? 1, 1, 999\)\)/);
 assert.match(source, /queueCountInput\.type = "number"/);
 assert.match(source, /queueMinusButton\.addEventListener/);
 assert.match(source, /queuePlusButton\.addEventListener/);

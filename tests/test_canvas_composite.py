@@ -42,7 +42,8 @@ class CanvasCompositeTests(unittest.TestCase):
         self.assertEqual(resolve_layer_size(2000, 1000, 1000, 1000, 1.0, "手动缩放"), (1000, 500))
         self.assertEqual(resolve_layer_size(100, 50, 1000, 1000, 1.0, "手动缩放"), (100, 50))
         self.assertEqual(resolve_layer_size(100, 50, 1000, 1000, 2.0, "手动缩放"), (200, 100))
-        self.assertEqual(resolve_layer_size(100, 50, 1000, 1000, 50.0, "手动缩放"), (100, 50))
+        self.assertEqual(resolve_layer_size(100, 50, 1000, 1000, 50.0, "手动缩放"), (2000, 1000))
+        self.assertEqual(resolve_layer_size(2000, 1000, 1000, 1000, 2.0, "手动缩放"), (2000, 1000))
 
     def test_layer_size_can_follow_canvas_height_or_width_percent(self):
         self.assertIn("高度占画布", SCALE_MODES)

@@ -4,6 +4,300 @@ export const SCALE_MODE_WIDTH = "宽度占画布";
 export const SCALE_MODE_MANUAL = "手动缩放";
 export const CANVAS_PERCENT_MAX = 2000;
 
+export function resolvePreviewArea({
+    widgetWidth,
+    widgetHeight,
+    canvasWidth,
+    canvasHeight,
+    horizontalMargin = 16,
+    verticalMargin = 8,
+}) {
+    const width = Math.max(1, Number(widgetWidth) || 1);
+    const height = Math.max(1, Number(widgetHeight) || 1);
+    const outputWidth = Math.max(1, Number(canvasWidth) || 1);
+    const outputHeight = Math.max(1, Number(canvasHeight) || 1);
+    const marginX = Math.max(0, Number(horizontalMargin) || 0);
+    const marginY = Math.max(0, Number(verticalMargin) || 0);
+    const outerWidth = Math.max(1, width - marginX * 2);
+    const outerHeight = Math.max(1, height - marginY * 2);
+    const ratio = outputWidth / outputHeight;
+
+    let areaWidth = outerWidth;
+    let areaHeight = areaWidth / ratio;
+    if (areaHeight > outerHeight) {
+        areaHeight = outerHeight;
+        areaWidth = areaHeight * ratio;
+    }
+    return {
+        x: marginX + (outerWidth - areaWidth) / 2,
+        y: marginY + (outerHeight - areaHeight) / 2,
+        width: areaWidth,
+        height: areaHeight,
+    };
+}
+
+export function resolvePreviewWidgetHeight({
+    widgetWidth,
+    canvasWidth,
+    canvasHeight,
+    horizontalMargin = 16,
+    minHeight = 230,
+    maxHeight = 560,
+}) {
+    const width = Math.max(1, Number(widgetWidth) || 1);
+    const outputWidth = Math.max(1, Number(canvasWidth) || 1);
+    const outputHeight = Math.max(1, Number(canvasHeight) || 1);
+    const marginX = Math.max(0, Number(horizontalMargin) || 0);
+    const availableWidth = Math.max(1, width - marginX * 2);
+    const naturalHeight = availableWidth * outputHeight / outputWidth;
+    return Math.round(Math.max(minHeight, Math.min(maxHeight, naturalHeight)));
+}
+
+function regularizationPixels(points, width, height) {
+    const maximumX = Math.max(1, (Number(width) || 2) - 1);
+    const maximumY = Math.max(1, (Number(height) || 2) - 1);
+    const result = [];
+    for (const point of Array.isArray(points) ? points : []) {
+        const x = Number(point?.[0]);
+        const y = Number(point?.[1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const pixel = [x * maximumX, y * maximumY];
+        const previous = result.at(-1);
+        if (!previous || Math.hypot(pixel[0] - previous[0], pixel[1] - previous[1]) >= 0.75) {
+            result.push(pixel);
+        }
+    }
+    return {points: result, maximumX, maximumY};
+}
+
+function polylineLength(points) {
+    let length = 0;
+    for (let index = 1; index < points.length; index += 1) {
+        length += Math.hypot(points[index][0] - points[index - 1][0], points[index][1] - points[index - 1][1]);
+    }
+    return length;
+}
+
+function solveLinear3(matrix, values) {
+    const rows = matrix.map((row, index) => [...row, values[index]]);
+    for (let column = 0; column < 3; column += 1) {
+        let pivot = column;
+        for (let row = column + 1; row < 3; row += 1) {
+            if (Math.abs(rows[row][column]) > Math.abs(rows[pivot][column])) pivot = row;
+        }
+        if (Math.abs(rows[pivot][column]) < 1e-9) return null;
+        [rows[column], rows[pivot]] = [rows[pivot], rows[column]];
+        const divisor = rows[column][column];
+        for (let index = column; index < 4; index += 1) rows[column][index] /= divisor;
+        for (let row = 0; row < 3; row += 1) {
+            if (row === column) continue;
+            const factor = rows[row][column];
+            for (let index = column; index < 4; index += 1) rows[row][index] -= factor * rows[column][index];
+        }
+    }
+    return rows.map((row) => row[3]);
+}
+
+function fitCircle(points) {
+    let xx = 0;
+    let xy = 0;
+    let yy = 0;
+    let x = 0;
+    let y = 0;
+    let xz = 0;
+    let yz = 0;
+    let z = 0;
+    for (const point of points) {
+        const px = point[0];
+        const py = point[1];
+        const squared = px * px + py * py;
+        xx += px * px;
+        xy += px * py;
+        yy += py * py;
+        x += px;
+        y += py;
+        xz += px * squared;
+        yz += py * squared;
+        z += squared;
+    }
+    const count = points.length;
+    const solution = solveLinear3(
+        [[xx, xy, x], [xy, yy, y], [x, y, count]],
+        [-xz, -yz, -z],
+    );
+    if (!solution) return null;
+    const centerX = -solution[0] / 2;
+    const centerY = -solution[1] / 2;
+    const radiusSquared = centerX * centerX + centerY * centerY - solution[2];
+    if (!Number.isFinite(radiusSquared) || radiusSquared <= 1) return null;
+    const radius = Math.sqrt(radiusSquared);
+    const radialErrors = points.map((point) => Math.abs(Math.hypot(point[0] - centerX, point[1] - centerY) - radius) / radius);
+    const rmsError = Math.sqrt(radialErrors.reduce((sum, error) => sum + error * error, 0) / radialErrors.length);
+    return {centerX, centerY, radius, rmsError};
+}
+
+function unwrapAngles(points, centerX, centerY) {
+    const angles = [Math.atan2(points[0][1] - centerY, points[0][0] - centerX)];
+    let backwards = 0;
+    let forwards = 0;
+    for (let index = 1; index < points.length; index += 1) {
+        let delta = Math.atan2(points[index][1] - centerY, points[index][0] - centerX) - angles[index - 1];
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        if (delta > 0.002) forwards += delta;
+        if (delta < -0.002) backwards -= delta;
+        angles.push(angles[index - 1] + delta);
+    }
+    const dominant = Math.max(forwards, backwards);
+    const reversalRatio = dominant > 0 ? Math.min(forwards, backwards) / dominant : 1;
+    return {start: angles[0], end: angles.at(-1), span: Math.abs(angles.at(-1) - angles[0]), reversalRatio};
+}
+
+function fitOrientedEllipse(points) {
+    const meanX = points.reduce((sum, point) => sum + point[0], 0) / points.length;
+    const meanY = points.reduce((sum, point) => sum + point[1], 0) / points.length;
+    let covarianceXX = 0;
+    let covarianceXY = 0;
+    let covarianceYY = 0;
+    for (const point of points) {
+        const dx = point[0] - meanX;
+        const dy = point[1] - meanY;
+        covarianceXX += dx * dx;
+        covarianceXY += dx * dy;
+        covarianceYY += dy * dy;
+    }
+    const rotation = 0.5 * Math.atan2(2 * covarianceXY, covarianceXX - covarianceYY);
+    const cosine = Math.cos(rotation);
+    const sine = Math.sin(rotation);
+    const projected = points.map((point) => {
+        const dx = point[0] - meanX;
+        const dy = point[1] - meanY;
+        return [dx * cosine + dy * sine, -dx * sine + dy * cosine];
+    });
+    const minU = Math.min(...projected.map((point) => point[0]));
+    const maxU = Math.max(...projected.map((point) => point[0]));
+    const minV = Math.min(...projected.map((point) => point[1]));
+    const maxV = Math.max(...projected.map((point) => point[1]));
+    const radiusU = (maxU - minU) / 2;
+    const radiusV = (maxV - minV) / 2;
+    if (radiusU < 8 || radiusV < 8) return null;
+    const offsetU = (minU + maxU) / 2;
+    const offsetV = (minV + maxV) / 2;
+    const centerX = meanX + offsetU * cosine - offsetV * sine;
+    const centerY = meanY + offsetU * sine + offsetV * cosine;
+    const errors = projected.map((point) => {
+        const u = (point[0] - offsetU) / radiusU;
+        const v = (point[1] - offsetV) / radiusV;
+        return Math.abs(Math.hypot(u, v) - 1);
+    });
+    const rmsError = Math.sqrt(errors.reduce((sum, error) => sum + error * error, 0) / errors.length);
+    const firstU = (projected[0][0] - offsetU) / radiusU;
+    const firstV = (projected[0][1] - offsetV) / radiusV;
+    const signedArea = points.reduce((sum, point, index) => {
+        const next = points[(index + 1) % points.length];
+        return sum + point[0] * next[1] - next[0] * point[1];
+    }, 0);
+    return {
+        centerX, centerY, radiusU, radiusV, rotation, rmsError,
+        startAngle: Math.atan2(firstV, firstU),
+        direction: signedArea >= 0 ? 1 : -1,
+    };
+}
+
+function normalizedRegularizationPoints(points, maximumX, maximumY) {
+    return points.map((point) => [
+        Math.max(0, Math.min(1, point[0] / maximumX)),
+        Math.max(0, Math.min(1, point[1] / maximumY)),
+    ]);
+}
+
+export function regularizeStrokePoints(points, width, height, sensitivity = 50) {
+    const converted = regularizationPixels(points, width, height);
+    const pixels = converted.points;
+    if (pixels.length < 2) return null;
+    const level = Math.max(0, Math.min(100, Number(sensitivity) || 0));
+    const lineTolerance = 0.008 + level * 0.00016;
+    const curveTolerance = 0.035 + level * 0.00045;
+    const first = pixels[0];
+    const last = pixels.at(-1);
+    const chord = Math.hypot(last[0] - first[0], last[1] - first[1]);
+    const pathLength = polylineLength(pixels);
+    const xs = pixels.map((point) => point[0]);
+    const ys = pixels.map((point) => point[1]);
+    const diagonal = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+    if (diagonal < 8 || pathLength < 8) return null;
+
+    if (chord >= 16) {
+        const dx = last[0] - first[0];
+        const dy = last[1] - first[1];
+        const squaredDistances = pixels.map((point) => {
+            const distance = Math.abs(dy * point[0] - dx * point[1] + last[0] * first[1] - last[1] * first[0]) / chord;
+            return distance * distance;
+        });
+        const rmsDistance = Math.sqrt(squaredDistances.reduce((sum, value) => sum + value, 0) / squaredDistances.length);
+        if (rmsDistance / chord <= lineTolerance && pathLength / chord <= 1.04 + level * 0.0012) {
+            return {
+                kind: "line",
+                confidence: Math.max(0, 1 - rmsDistance / Math.max(1, chord * lineTolerance)),
+                points: [[...points[0]], [...points.at(-1)]],
+            };
+        }
+    }
+
+    if (pixels.length < 8) return null;
+    const closureRatio = chord / Math.max(1, diagonal);
+    if (closureRatio <= 0.08 + level * 0.0014) {
+        const ellipse = fitOrientedEllipse(pixels);
+        if (ellipse && ellipse.rmsError <= curveTolerance) {
+            const axisRatio = Math.max(ellipse.radiusU, ellipse.radiusV) / Math.min(ellipse.radiusU, ellipse.radiusV);
+            const kind = axisRatio <= 1.12 + level * 0.0008 ? "circle" : "ellipse";
+            const radiusU = kind === "circle" ? (ellipse.radiusU + ellipse.radiusV) / 2 : ellipse.radiusU;
+            const radiusV = kind === "circle" ? radiusU : ellipse.radiusV;
+            const generated = [];
+            const count = 72;
+            const cosine = Math.cos(ellipse.rotation);
+            const sine = Math.sin(ellipse.rotation);
+            for (let index = 0; index <= count; index += 1) {
+                const angle = ellipse.startAngle + ellipse.direction * index / count * Math.PI * 2;
+                const u = Math.cos(angle) * radiusU;
+                const v = Math.sin(angle) * radiusV;
+                generated.push([
+                    ellipse.centerX + u * cosine - v * sine,
+                    ellipse.centerY + u * sine + v * cosine,
+                ]);
+            }
+            const normalized = normalizedRegularizationPoints(generated, converted.maximumX, converted.maximumY);
+            normalized[normalized.length - 1] = [...normalized[0]];
+            return {kind, confidence: Math.max(0, 1 - ellipse.rmsError / curveTolerance), points: normalized};
+        }
+    }
+
+    if (closureRatio > 0.12 && pixels.length >= 12) {
+        const circle = fitCircle(pixels);
+        if (circle && circle.rmsError <= curveTolerance) {
+            const angles = unwrapAngles(pixels, circle.centerX, circle.centerY);
+            const minimumSpan = Math.PI * (0.18 + (100 - level) * 0.0012);
+            if (angles.span >= minimumSpan && angles.span <= Math.PI * 1.92 && angles.reversalRatio <= 0.08 + level * 0.0012) {
+                const generated = [];
+                const count = Math.max(16, Math.min(96, Math.ceil(angles.span / (Math.PI * 2) * 72)));
+                for (let index = 0; index <= count; index += 1) {
+                    const angle = angles.start + (angles.end - angles.start) * index / count;
+                    generated.push([
+                        circle.centerX + Math.cos(angle) * circle.radius,
+                        circle.centerY + Math.sin(angle) * circle.radius,
+                    ]);
+                }
+                return {
+                    kind: "arc",
+                    confidence: Math.max(0, 1 - circle.rmsError / curveTolerance),
+                    points: normalizedRegularizationPoints(generated, converted.maximumX, converted.maximumY),
+                };
+            }
+        }
+    }
+    return null;
+}
+
 export function smoothStrokePoints(points, strength = 0.96, passes = 3) {
     if (!Array.isArray(points) || points.length < 3) {
         return Array.isArray(points) ? points.map((point) => [...point]) : [];
@@ -50,7 +344,7 @@ export function smoothStrokePoints(points, strength = 0.96, passes = 3) {
 export function smoothDrawingStrokes(strokes, strength = 0.96, passes = 3) {
     let optimizedCount = 0;
     const optimized = (strokes || []).map((stroke) => {
-        if (!stroke || stroke.tool === "lasso" || stroke.shape || !Array.isArray(stroke.points) || stroke.points.length < 3) {
+        if (!stroke || stroke.tool === "lasso" || stroke.shape || stroke.regularizedKind || !Array.isArray(stroke.points) || stroke.points.length < 3) {
             return structuredClone(stroke);
         }
         optimizedCount += 1;
@@ -294,7 +588,7 @@ export function normalizeScaleMode(value) {
 
 export function normalizeManualScale(value) {
     const scale = Math.max(0.01, Number(value) || 1);
-    return scale > 10 ? 1 : scale;
+    return Math.min(CANVAS_PERCENT_MAX / 100, scale);
 }
 
 export function fitLayerToPreview(layerWidth, layerHeight, areaWidth, areaHeight) {
@@ -322,13 +616,16 @@ export function resizeLayerFromCorner({
     areaWidth,
     areaHeight,
     minSize = 16,
+    maxScale = CANVAS_PERCENT_MAX / 100,
 }) {
     const ratio = Math.max(0.01, Number(aspectRatio) || 1);
     const directionX = signX < 0 ? -1 : 1;
     const directionY = signY < 0 ? -1 : 1;
-    const availableWidth = directionX < 0 ? anchorX - areaX : areaX + areaWidth - anchorX;
-    const availableHeight = directionY < 0 ? anchorY - areaY : areaY + areaHeight - anchorY;
-    const maxWidth = Math.max(1, Math.min(availableWidth, availableHeight * ratio));
+    const safeMaxScale = Math.max(1, Number(maxScale) || 1);
+    const maxWidth = Math.max(1, Math.min(
+        Math.max(1, Number(areaWidth) || 1) * safeMaxScale,
+        Math.max(1, Number(areaHeight) || 1) * safeMaxScale * ratio,
+    ));
     const minimumWidth = Math.min(maxWidth, Math.max(1, minSize, minSize * ratio));
     const requestedWidth = Math.max(
         Math.abs(Number(pointerX) - anchorX),
@@ -456,9 +753,6 @@ export function resolveLayerSize({
         const manualScale = normalizeManualScale(scale);
         targetWidth = sourceWidth * baseScale * manualScale;
         targetHeight = sourceHeight * baseScale * manualScale;
-        const edgeFit = Math.min(1, outputWidth / targetWidth, outputHeight / targetHeight);
-        targetWidth *= edgeFit;
-        targetHeight *= edgeFit;
     }
 
     return {
@@ -510,5 +804,5 @@ export function scaleValuesFromPreview({
     if (mode === SCALE_MODE_FIT) {
         return {canvasPercent: Math.max(1, Math.min(CANVAS_PERCENT_MAX, ratio * 100))};
     }
-    return {manualScale: Math.max(0.01, Math.min(10, ratio))};
+    return {manualScale: Math.max(0.01, Math.min(CANVAS_PERCENT_MAX / 100, ratio))};
 }

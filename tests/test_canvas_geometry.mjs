@@ -7,6 +7,9 @@ import {
     fitLayerToPreview,
     normalizeManualScale,
     normalizeScaleMode,
+    regularizeStrokePoints,
+    resolvePreviewArea,
+    resolvePreviewWidgetHeight,
     resolveDraggedLayerPosition,
     resolveRotatedBounds,
     resizeLayerFromCorner,
@@ -21,6 +24,82 @@ import {
     translateStrokeLayer,
     transformDrawingGroup,
 } from "../js/jindouyun_canvas_geometry.mjs";
+
+const tallPreview = resolvePreviewArea({
+    widgetWidth: 360,
+    widgetHeight: 500,
+    canvasWidth: 1152,
+    canvasHeight: 2048,
+});
+assert.ok(tallPreview.height > 450);
+assert.ok(tallPreview.width > 250);
+assert.ok(Math.abs(tallPreview.width / tallPreview.height - 1152 / 2048) < 0.001);
+assert.ok(tallPreview.x >= 16);
+assert.ok(tallPreview.y >= 8);
+
+assert.equal(resolvePreviewWidgetHeight({
+    widgetWidth: 360,
+    canvasWidth: 1152,
+    canvasHeight: 2048,
+}), 560);
+assert.equal(resolvePreviewWidgetHeight({
+    widgetWidth: 360,
+    canvasWidth: 2048,
+    canvasHeight: 1152,
+}), 230);
+
+const normalizedHandStroke = (pixelPoints, width = 1000, height = 800) =>
+    pixelPoints.map(([x, y]) => [x / width, y / height]);
+
+const shakyLine = normalizedHandStroke(Array.from({length: 70}, (_, index) => {
+    const progress = index / 69;
+    return [120 + progress * 700, 160 + progress * 430 + Math.sin(index * 0.85) * 5];
+}));
+const regularLine = regularizeStrokePoints(shakyLine, 1000, 800, 50);
+assert.equal(regularLine.kind, "line");
+assert.equal(regularLine.points.length, 2);
+assert.deepEqual(regularLine.points[0], shakyLine[0]);
+assert.deepEqual(regularLine.points[1], shakyLine.at(-1));
+
+const borderlineLine = normalizedHandStroke(Array.from({length: 70}, (_, index) => {
+    const progress = index / 69;
+    return [100 + progress * 760, 220 + progress * 300 + Math.sin(index * 0.58) * 13];
+}));
+assert.equal(regularizeStrokePoints(borderlineLine, 1000, 800, 0), null);
+assert.equal(regularizeStrokePoints(borderlineLine, 1000, 800, 100)?.kind, "line");
+
+const roughCircle = normalizedHandStroke(Array.from({length: 97}, (_, index) => {
+    const angle = index / 96 * Math.PI * 2;
+    const wobble = 1 + Math.sin(index * 0.72) * 0.035;
+    return [500 + Math.cos(angle) * 175 * wobble, 390 + Math.sin(angle) * 175 * wobble];
+}));
+const regularCircle = regularizeStrokePoints(roughCircle, 1000, 800, 50);
+assert.equal(regularCircle.kind, "circle");
+assert.deepEqual(regularCircle.points[0], regularCircle.points.at(-1));
+assert.ok(regularCircle.points.length >= 49);
+
+const roughEllipse = normalizedHandStroke(Array.from({length: 97}, (_, index) => {
+    const angle = index / 96 * Math.PI * 2;
+    return [510 + Math.cos(angle) * (245 + Math.sin(index * 0.61) * 7), 405 + Math.sin(angle) * (115 + Math.cos(index * 0.47) * 5)];
+}));
+const regularEllipse = regularizeStrokePoints(roughEllipse, 1000, 800, 50);
+assert.equal(regularEllipse.kind, "ellipse");
+assert.deepEqual(regularEllipse.points[0], regularEllipse.points.at(-1));
+
+const roughArc = normalizedHandStroke(Array.from({length: 65}, (_, index) => {
+    const angle = -Math.PI * 0.85 + index / 64 * Math.PI * 1.25;
+    const radius = 230 + Math.sin(index * 0.8) * 5;
+    return [500 + Math.cos(angle) * radius, 410 + Math.sin(angle) * radius];
+}));
+const regularArc = regularizeStrokePoints(roughArc, 1000, 800, 50);
+assert.equal(regularArc.kind, "arc");
+assert.ok(regularArc.points.length >= 16);
+assert.notDeepEqual(regularArc.points[0], regularArc.points.at(-1));
+
+const freeWave = normalizedHandStroke([
+    [100, 400], [180, 220], [280, 560], [390, 180], [510, 590], [640, 230], [780, 430],
+]);
+assert.equal(regularizeStrokePoints(freeWave, 1000, 800, 50), null);
 
 assert.deepEqual(resolveSmoothingProfile(50), {strength: 0.95, passes: 3});
 assert.equal(resolveSmoothingProfile(100).strength, 1);
@@ -55,11 +134,13 @@ const optimizedDrawing = smoothDrawingStrokes([
     {tool: "brush", points: shakyVerticalStroke},
     {tool: "lasso", points: lassoPoints},
     {tool: "brush", shape: "circle", points: shakyVerticalStroke},
+    {tool: "brush", regularizedKind: "arc", points: shakyVerticalStroke},
 ], 0.95, 3);
 assert.equal(optimizedDrawing.optimizedCount, 1);
 assert.notDeepEqual(optimizedDrawing.strokes[0].points, shakyVerticalStroke);
 assert.deepEqual(optimizedDrawing.strokes[1].points, lassoPoints);
 assert.deepEqual(optimizedDrawing.strokes[2].points, shakyVerticalStroke);
+assert.deepEqual(optimizedDrawing.strokes[3].points, shakyVerticalStroke);
 
 const circlePoints = createShapeStrokePoints({
     shape: "circle", centerX: 500, centerY: 250, pointerX: 600, pointerY: 250,
@@ -147,7 +228,7 @@ assert.deepEqual(roundedPoints(mirroredGroup[0].points), [[0.375, 0.45], [0.375,
 assert.deepEqual(roundedPoints(mirroredGroup[0].mirrorPoints), [[0.625, 0.45], [0.625, 0.55]]);
 
 assert.equal(CANVAS_PERCENT_MAX, 2000);
-assert.equal(normalizeManualScale(50), 1);
+assert.equal(normalizeManualScale(50), 20);
 assert.equal(normalizeScaleMode(""), SCALE_MODE_FIT);
 assert.equal(normalizeScaleMode(50), SCALE_MODE_FIT);
 assert.deepEqual(
@@ -168,7 +249,24 @@ assert.deepEqual(
         areaWidth: 100,
         areaHeight: 100,
     }),
-    {width: 90, height: 45, centerX: 55, centerY: 32.5},
+    {width: 120, height: 60, centerX: 70, centerY: 40},
+);
+
+assert.deepEqual(
+    resizeLayerFromCorner({
+        pointerX: 260,
+        pointerY: 135,
+        anchorX: 10,
+        anchorY: 10,
+        signX: 1,
+        signY: 1,
+        aspectRatio: 2,
+        areaX: 0,
+        areaY: 0,
+        areaWidth: 100,
+        areaHeight: 100,
+    }),
+    {width: 250, height: 125, centerX: 135, centerY: 72.5},
 );
 
 assert.deepEqual(

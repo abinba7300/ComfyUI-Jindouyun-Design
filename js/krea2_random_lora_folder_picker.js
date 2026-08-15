@@ -6,6 +6,150 @@ const NODE_TYPES = new Set([
     "Krea2RandomLoraModelOnly",
     "NunchakuRandomLoraModelOnly",
 ]);
+const MODE_BADGE_NODE_TYPE = "JindouyunRandomLora";
+
+function fixedLoraLabel(value) {
+    const text = String(value || "").trim();
+    if (!text || text === "无") {
+        return "尚未选择固定 LoRA";
+    }
+    const parts = text.split(/[\\/]/);
+    return parts[parts.length - 1] || text;
+}
+
+function roundedRect(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+        ctx.roundRect(x, y, width, height, radius);
+    } else {
+        ctx.rect(x, y, width, height);
+    }
+}
+
+function drawModeCard(ctx, node, width, y, randomWidget, fixedWidget) {
+    const randomMode = randomWidget.value !== false;
+    const cardX = 15;
+    const cardY = y + 1;
+    const cardWidth = Math.max(80, width - 30);
+    const cardHeight = 48;
+    const accent = randomMode ? "#39C77A" : "#58A6FF";
+    const iconAccent = randomMode ? "#67D391" : "#72B7FF";
+    const title = randomMode ? "随机目录模式" : "固定 LoRA 模式";
+    const detail = randomMode
+        ? "目录内全部 LoRA · 每次随机 1 个"
+        : fixedLoraLabel(fixedWidget.value);
+
+    ctx.save();
+    roundedRect(ctx, cardX, cardY, cardWidth, cardHeight, 6);
+    ctx.fillStyle = randomMode ? "rgba(57, 199, 122, 0.14)" : "rgba(88, 166, 255, 0.14)";
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.fill();
+    ctx.stroke();
+
+    const iconX = cardX + 26;
+    const iconY = cardY + cardHeight / 2;
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 15, 0, Math.PI * 2);
+    ctx.fillStyle = randomMode ? "rgba(57, 199, 122, 0.10)" : "rgba(88, 166, 255, 0.10)";
+    ctx.strokeStyle = iconAccent;
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillStyle = iconAccent;
+    ctx.font = "800 14px Arial";
+    ctx.fillText(randomMode ? "随" : "固", iconX, iconY);
+
+    const textX = cardX + 52;
+    const textWidth = Math.max(0, cardWidth - 62);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#F7F8FA";
+    ctx.font = "700 13px Arial";
+    ctx.fillText(fitText(ctx, title, textWidth), textX, cardY + 18);
+    ctx.fillStyle = "#C8CED8";
+    ctx.font = "10px Arial";
+    ctx.fillText(fitText(ctx, detail, textWidth), textX, cardY + 35);
+    ctx.restore();
+}
+
+function patchModeBadge(node) {
+    if ((node.comfyClass || node.type) !== MODE_BADGE_NODE_TYPE) return;
+
+    const randomWidget = node.widgets?.find((item) => item.name === "随机");
+    const fixedWidget = node.widgets?.find((item) => item.name === "固定");
+    if (!randomWidget || !fixedWidget || randomWidget.__jindouyunModeCard) return;
+    randomWidget.__jindouyunModeCard = true;
+
+    randomWidget.computeSize = (width) => [width || node.size?.[0] || 320, 60];
+    randomWidget.draw = function(ctx, currentNode, width, y) {
+        drawModeCard(ctx, currentNode || node, width, y, randomWidget, fixedWidget);
+    };
+
+    const originalMouse = randomWidget.mouse;
+    randomWidget.mouse = function(event) {
+        const type = String(event?.type || "").toLowerCase();
+        if (type === "pointerdown" || type === "mousedown" || type === "click") {
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
+            const nextValue = !(randomWidget.value !== false);
+            randomWidget.value = nextValue;
+            randomWidget.callback?.(nextValue, app.canvas, node, randomWidget);
+            node.setDirtyCanvas?.(true, true);
+            app.graph?.setDirtyCanvas?.(true, true);
+            return true;
+        }
+        return originalMouse?.apply(this, arguments);
+    };
+}
+
+function migrateSavedModeBadgeValue(info) {
+    if (Array.isArray(info?.inputs)) {
+        info.inputs = info.inputs.filter((input) => (
+            input?.name !== "启用" && input?.localized_name !== "启用"
+        ));
+    }
+
+    let values = info?.widgets_values;
+    if (!Array.isArray(values)) return;
+
+    if (
+        values.length >= 15 &&
+        (values[0] === "" || values[0] == null) &&
+        typeof values[1] === "boolean" &&
+        typeof values[2] === "boolean" &&
+        typeof values[3] === "string" &&
+        typeof values[4] === "string"
+    ) {
+        values = values.slice(1);
+    }
+
+    if (
+        typeof values[0] === "boolean" &&
+        typeof values[1] === "boolean" &&
+        typeof values[2] === "string"
+    ) {
+        values = values.slice(1);
+    }
+    info.widgets_values = values;
+}
+
+function migrateWorkflowGraphData(graphData) {
+    const visitNodes = (nodes) => {
+        if (!Array.isArray(nodes)) return;
+        for (const node of nodes) {
+            if (node?.type === MODE_BADGE_NODE_TYPE) {
+                migrateSavedModeBadgeValue(node);
+            }
+        }
+    };
+
+    visitNodes(graphData?.nodes);
+    for (const subgraph of graphData?.definitions?.subgraphs || []) {
+        visitNodes(subgraph?.nodes);
+    }
+}
 
 async function chooseFolder(widget, node) {
     if (widget.__jindouyunFolderDialogOpen) {
@@ -140,17 +284,37 @@ function patchFolderWidget(node) {
 function patchNode(node) {
     if (NODE_TYPES.has(node.comfyClass || node.type)) {
         patchFolderWidget(node);
+        patchModeBadge(node);
     }
 }
 
 app.registerExtension({
     name: "comfyui-jindouyun-design.folder-picker",
+    beforeConfigureGraph(graphData) {
+        migrateWorkflowGraphData(graphData);
+    },
     nodeCreated(node) {
+        patchNode(node);
+    },
+    loadedGraphNode(node) {
         patchNode(node);
     },
     beforeRegisterNodeDef(nodeType, nodeData) {
         if (!NODE_TYPES.has(nodeData.name)) {
             return;
+        }
+        if (nodeData.name === MODE_BADGE_NODE_TYPE) {
+            const originalConfigure = nodeType.prototype.configure;
+            nodeType.prototype.configure = function(info) {
+                migrateSavedModeBadgeValue(info);
+                const result = originalConfigure?.apply(this, arguments);
+                if (Array.isArray(this.inputs)) {
+                    this.inputs = this.inputs.filter((input) => (
+                        input?.name !== "启用" && input?.localized_name !== "启用"
+                    ));
+                }
+                return result;
+            };
         }
         const originalOnAdded = nodeType.prototype.onAdded;
         nodeType.prototype.onAdded = function() {

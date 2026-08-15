@@ -1,5 +1,5 @@
 import { app } from "../../scripts/app.js";
-import * as canvasGeometry from "./jindouyun_canvas_geometry.mjs?v=20260721-groups4";
+import * as canvasGeometry from "./jindouyun_canvas_geometry.mjs?v=20260815-canvas-overflow1";
 
 const {
     normalizeScaleMode,
@@ -18,6 +18,7 @@ const translateStrokeLayer = canvasGeometry.translateStrokeLayer || ((stroke) =>
 const drawingGroupBounds = canvasGeometry.drawingGroupBounds || (() => null);
 const transformDrawingGroup = canvasGeometry.transformDrawingGroup || ((strokes) => structuredClone(strokes || []));
 const createShapeStrokePoints = canvasGeometry.createShapeStrokePoints || (() => []);
+const regularizeStrokePoints = canvasGeometry.regularizeStrokePoints || (() => null);
 const scaleDrawingStrokes = canvasGeometry.scaleDrawingStrokes || ((strokes) => ({
     scale: 1,
     centerX: 0.5,
@@ -41,7 +42,7 @@ const resolveRotatedBounds = canvasGeometry.resolveRotatedBounds || ((width, hei
 });
 
 const NODE_TYPE = "JindouyunCanvasComposite";
-const DEFAULT_DATA = {version: 5, smoothing: true, smoothingStrength: 50, brushColor: "#FF6A00", eyedropperColor: "#FF6A00", brushType: "solid", inputVisible: true, groups: [], strokes: []};
+const DEFAULT_DATA = {version: 7, smoothing: true, smoothingStrength: 50, smartRegularize: false, regularizeSensitivity: 50, brushColor: "#FF6A00", eyedropperColor: "#FF6A00", savedColors: [], brushType: "solid", inputVisible: true, groups: [], strokes: []};
 const COLOR_PRESETS = [
     ["金色", "#D4AF37"],
     ["银色", "#C0C0C0"],
@@ -57,6 +58,8 @@ const COLORS = COLOR_PRESETS.map(([, color]) => color);
 const LASSO_CLOSE_DISTANCE = 24;
 const BRUSH_COLOR_STORAGE_KEY = "jindouyun.canvas.brushColor";
 const EYEDROPPER_COLOR_STORAGE_KEY = "jindouyun.canvas.eyedropperColor";
+const SAVED_COLORS_STORAGE_KEY = "jindouyun.canvas.savedColors";
+const MAX_SAVED_COLORS = 20;
 
 function findWidget(node, name) {
     return node.widgets?.find((widget) => widget.name === name);
@@ -159,6 +162,44 @@ function rememberEyedropperColor(node, drawing, color) {
     return normalized;
 }
 
+function normalizeSavedColors(values) {
+    const normalized = [];
+    for (const value of Array.isArray(values) ? values : []) {
+        const match = String(value || "").trim().match(/^#?([0-9a-fA-F]{6})$/);
+        if (!match) continue;
+        const color = `#${match[1].toUpperCase()}`;
+        if (COLORS.includes(color) || normalized.includes(color)) continue;
+        normalized.push(color);
+    }
+    return normalized.slice(-MAX_SAVED_COLORS);
+}
+
+function preferredSavedColors(node, drawing) {
+    let storedColors = [];
+    try {
+        storedColors = JSON.parse(window.localStorage?.getItem(SAVED_COLORS_STORAGE_KEY) || "[]");
+    } catch (_) {
+        // Browser privacy settings can disable local storage.
+    }
+    return normalizeSavedColors([
+        ...(drawing.savedColors || []),
+        ...(node.__jindouyunSavedColors || []),
+        ...storedColors,
+    ]);
+}
+
+function rememberSavedColors(node, drawing, colors) {
+    const normalized = normalizeSavedColors(colors);
+    drawing.savedColors = normalized;
+    node.__jindouyunSavedColors = normalized;
+    try {
+        window.localStorage?.setItem(SAVED_COLORS_STORAGE_KEY, JSON.stringify(normalized));
+    } catch (_) {
+        // Keep the node-local colors when local storage is unavailable.
+    }
+    return normalized;
+}
+
 function parseDrawingData(value) {
     try {
         const parsed = JSON.parse(String(value || ""));
@@ -192,11 +233,14 @@ function parseDrawingData(value) {
                 if (hiddenGroups.has(stroke?.groupId)) stroke.groupVisible = false;
             }
             return {
-                version: 5,
+                version: 7,
                 smoothing: parsed.smoothing !== false,
                 smoothingStrength,
+                smartRegularize: parsed.smartRegularize === true,
+                regularizeSensitivity: clamp(parsed.regularizeSensitivity ?? 50, 0, 100),
                 brushColor: normalizeColor(parsed.brushColor || "#FF6A00"),
                 eyedropperColor: normalizeColor(parsed.eyedropperColor || parsed.brushColor || "#FF6A00"),
+                savedColors: normalizeSavedColors(parsed.savedColors),
                 brushType: parsed.brushType === "pencil" ? "pencil" : "solid",
                 inputVisible: parsed.inputVisible !== false,
                 groups,
@@ -518,6 +562,81 @@ function strokePixelPointSets(stroke, width, height) {
     return sets;
 }
 
+function strokeVisibilityGuideColor(stroke) {
+    const color = normalizeColor(stroke?.color, "#111111");
+    const red = Number.parseInt(color.slice(1, 3), 16);
+    const green = Number.parseInt(color.slice(3, 5), 16);
+    const blue = Number.parseInt(color.slice(5, 7), 16);
+    const luminance = (red * 0.299 + green * 0.587 + blue * 0.114) / 255;
+    const pencil = stroke?.brushType === "pencil";
+    if (luminance < 0.55) {
+        return pencil ? "rgba(210, 232, 255, 0.66)" : "rgba(210, 232, 255, 0.92)";
+    }
+    return pencil ? "rgba(4, 10, 18, 0.62)" : "rgba(4, 10, 18, 0.88)";
+}
+
+function paintStrokeVisibilityShape(ctx, points, lineWidth) {
+    if (!points.length) {
+        return;
+    }
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    if (points.length === 1) {
+        ctx.arc(points[0][0], points[0][1], lineWidth / 2, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+    }
+    ctx.moveTo(points[0][0], points[0][1]);
+    for (let index = 1; index < points.length; index += 1) {
+        ctx.lineTo(points[index][0], points[index][1]);
+    }
+    ctx.stroke();
+}
+
+function drawStrokeVisibilityGuide(ctx, stroke, width, height) {
+    if (stroke?.visible === false || stroke?.groupVisible === false || stroke?.tool !== "brush") {
+        return;
+    }
+    const pointSets = strokePixelPointSets(stroke, width, height);
+    const baseWidth = Math.max(1, Number(stroke.size || 0.02) * Math.min(width, height));
+    const pencil = stroke?.brushType === "pencil";
+    const guideThickness = clamp(baseWidth * (pencil ? 0.22 : 0.32), 2.5, pencil ? 5.5 : 8);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+    ctx.clip();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = strokeVisibilityGuideColor(stroke);
+    ctx.fillStyle = strokeVisibilityGuideColor(stroke);
+    for (const points of pointSets) {
+        paintStrokeVisibilityShape(ctx, points, baseWidth + guideThickness * 2);
+    }
+
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.strokeStyle = "rgba(0, 0, 0, 1)";
+    ctx.fillStyle = "rgba(0, 0, 0, 1)";
+    for (const points of pointSets) {
+        paintStrokeVisibilityShape(ctx, points, baseWidth + 0.5);
+    }
+    ctx.restore();
+}
+
+function drawStrokeVisibilityGuides(targetContext, strokes, width, height, guideCanvas) {
+    if (guideCanvas.width !== width || guideCanvas.height !== height) {
+        guideCanvas.width = width;
+        guideCanvas.height = height;
+    }
+    const guideContext = guideCanvas.getContext("2d");
+    guideContext.clearRect(0, 0, width, height);
+    for (const stroke of strokes) {
+        drawStrokeVisibilityGuide(guideContext, stroke, width, height);
+    }
+    targetContext.drawImage(guideCanvas, 0, 0);
+}
+
 function pointSegmentDistance(x, y, start, end) {
     const dx = end[0] - start[0];
     const dy = end[1] - start[1];
@@ -714,13 +833,16 @@ function openDrawingEditor(node) {
     let tool = "brush";
     let brushColor = preferredBrushColor(node, drawing);
     let eyedropperColor = preferredEyedropperColor(node, drawing, brushColor);
+    let savedColors = preferredSavedColors(node, drawing);
     let brushType = drawing.brushType === "pencil" ? "pencil" : "solid";
     let fillColor = "#FFFFFF";
     let brushSize = 10;
-    let queueCount = Math.round(clamp(node.__jindouyunQueueCount ?? 2, 1, 999));
+    let queueCount = Math.round(clamp(node.__jindouyunQueueCount ?? 1, 1, 999));
     let mirrorEnabled = node.__jindouyunMirrorEnabled === true;
     let smoothingEnabled = drawing.smoothing !== false;
     let smoothingStrength = clamp(drawing.smoothingStrength ?? 50, 0, 100);
+    let smartRegularizeEnabled = drawing.smartRegularize === true;
+    let regularizeSensitivity = clamp(drawing.regularizeSensitivity ?? 50, 0, 100);
     let drawingScale = 1;
     let currentStroke = null;
     let currentStrokeHasHistory = false;
@@ -925,6 +1047,38 @@ function openDrawingEditor(node) {
     smoothingStrengthInput.style.width = "100px";
     smoothingStrengthInput.title = "调整新笔画自动稳定和优化全部的处理强度";
     smoothingStrengthLabel.append(smoothingStrengthText, smoothingStrengthInput);
+    const smartRegularizeToggleLabel = document.createElement("label");
+    Object.assign(smartRegularizeToggleLabel.style, {
+        display: "flex", alignItems: "center", gap: "7px", padding: "0 9px",
+        height: "34px", border: "1px solid #59616D", borderRadius: "5px",
+        background: "#252A31", color: "#F5F7FA", fontSize: "13px",
+        whiteSpace: "nowrap", cursor: "pointer", boxSizing: "border-box",
+    });
+    const smartRegularizeToggle = document.createElement("input");
+    smartRegularizeToggle.type = "checkbox";
+    smartRegularizeToggle.checked = smartRegularizeEnabled;
+    smartRegularizeToggle.title = "自动将近似手绘直线、圆形、椭圆和圆弧规整为标准形态";
+    smartRegularizeToggle.style.accentColor = "#2387FF";
+    const smartRegularizeText = document.createElement("span");
+    smartRegularizeText.textContent = "智能规整";
+    smartRegularizeToggleLabel.append(smartRegularizeToggle, smartRegularizeText);
+
+    const regularizeSensitivityLabel = document.createElement("label");
+    Object.assign(regularizeSensitivityLabel.style, {
+        display: "flex", alignItems: "center", gap: "6px", height: "34px",
+        padding: "0 8px", border: "1px solid #3F4650", borderRadius: "5px",
+        background: "#252A31", color: "#F5F7FA", fontSize: "13px", whiteSpace: "nowrap",
+    });
+    const regularizeSensitivityText = document.createElement("span");
+    regularizeSensitivityText.textContent = `识别灵敏度 ${Math.round(regularizeSensitivity)}%`;
+    const regularizeSensitivityInput = document.createElement("input");
+    regularizeSensitivityInput.type = "range";
+    regularizeSensitivityInput.min = "0";
+    regularizeSensitivityInput.max = "100";
+    regularizeSensitivityInput.step = "1";
+    regularizeSensitivityInput.value = String(Math.round(regularizeSensitivity));
+    regularizeSensitivityInput.title = "调高更容易识别规整，调低则更谨慎保留自由笔画";
+    regularizeSensitivityLabel.append(regularizeSensitivityText, regularizeSensitivityInput);
     const optimizeAllButton = makeButton("优化全部", "按当前强度修复全部已完成曲线，可撤销");
     const optimizeSelectedButton = makeButton("优化选中", "只修复当前选中的曲线，可撤销");
 
@@ -1020,21 +1174,53 @@ function openDrawingEditor(node) {
         colorPresetGrid.appendChild(swatch);
         return swatch;
     });
-    const eyedropperColorButton = document.createElement("button");
-    eyedropperColorButton.type = "button";
-    Object.assign(eyedropperColorButton.style, {
-        width: "30px", height: "30px", padding: "0", borderRadius: "50%",
-        background: eyedropperColor, border: "2px solid transparent", cursor: "pointer",
-        boxShadow: "0 0 0 1px #15191E, 0 1px 4px rgba(0,0,0,.35)",
-    });
-    eyedropperColorButton.addEventListener("click", () => {
-        brushColor = rememberBrushColor(node, drawing, eyedropperColor);
+    const savedColorButtons = [];
+    function rebuildSavedColorButtons() {
+        savedColorButtons.splice(0).forEach((button) => button.remove());
+        savedColors.forEach((savedColor) => {
+            const swatch = document.createElement("button");
+            swatch.type = "button";
+            swatch.title = `已保存颜色 ${savedColor}，点击重新使用`;
+            swatch.setAttribute("aria-label", swatch.title);
+            Object.assign(swatch.style, {
+                width: "30px", height: "30px", padding: "0", borderRadius: "50%",
+                background: savedColor, border: "2px solid transparent", cursor: "pointer",
+                boxShadow: "0 0 0 1px #15191E, 0 1px 4px rgba(0,0,0,.35)",
+            });
+            swatch.addEventListener("click", () => {
+                if (tool === "lasso") {
+                    fillColor = savedColor;
+                } else {
+                    brushColor = rememberBrushColor(node, drawing, savedColor);
+                    if (tool !== "shape") tool = "brush";
+                }
+                selectedStrokeIndex = -1;
+                refreshControls();
+                render();
+            });
+            savedColorButtons.push(swatch);
+            colorPresetGrid.appendChild(swatch);
+        });
+    }
+    function addSavedColor(color) {
+        const previous = savedColors.join(",");
+        savedColors = rememberSavedColors(node, drawing, [...savedColors, color]);
+        if (savedColors.join(",") !== previous) rebuildSavedColorButtons();
+    }
+    function applyPickedColor(color, message) {
+        const selectedColor = normalizeColor(color, brushColor);
+        brushColor = rememberBrushColor(node, drawing, selectedColor);
+        eyedropperColor = rememberEyedropperColor(node, drawing, selectedColor);
+        addSavedColor(selectedColor);
         tool = "brush";
         selectedStrokeIndex = -1;
+        groupSelection = null;
         refreshControls();
         render();
-    });
-    colorPresetGrid.appendChild(eyedropperColorButton);
+        statusMessage.textContent = `${message} ${selectedColor}，已新增颜色球`;
+        statusMessage.style.color = "#39FF88";
+    }
+    rebuildSavedColorButtons();
     const customColorWrapper = document.createElement("div");
     customColorWrapper.title = "打开自定义调色盘";
     Object.assign(customColorWrapper.style, {
@@ -1051,6 +1237,7 @@ function openDrawingEditor(node) {
     });
     const customColor = document.createElement("input");
     let nativeColorPickerActive = false;
+    let screenEyedropperActive = false;
     customColor.type = "color";
     customColor.value = brushColor;
     customColor.title = "自定义当前工具颜色";
@@ -1059,11 +1246,15 @@ function openDrawingEditor(node) {
         border: "0", padding: "0", cursor: "pointer",
     });
     function applyCustomColor(event) {
+        const selectedColor = normalizeColor(customColor.value, tool === "lasso" ? "#FFFFFF" : brushColor);
         if (tool === "lasso") {
-            fillColor = normalizeColor(customColor.value, "#FFFFFF");
+            fillColor = selectedColor;
         } else {
-            brushColor = rememberBrushColor(node, drawing, customColor.value);
+            brushColor = rememberBrushColor(node, drawing, selectedColor);
             if (tool !== "shape") tool = "brush";
+        }
+        if (event?.type === "change") {
+            addSavedColor(selectedColor);
         }
         refreshControls();
         render();
@@ -1078,7 +1269,16 @@ function openDrawingEditor(node) {
     customColor.addEventListener("input", applyCustomColor);
     customColor.addEventListener("change", applyCustomColor);
     customColorWrapper.append(customColorPreview, customColor);
-    colorHeader.appendChild(customColorWrapper);
+    const screenEyedropperButton = makeButton("屏幕取色", "直接吸取屏幕任意位置的颜色并自动新增颜色球");
+    Object.assign(screenEyedropperButton.style, {
+        width: "82px", height: "38px", padding: "0 8px", flex: "0 0 82px",
+        background: "#153A63", borderColor: "#4DA3FF", color: "#FFFFFF", fontWeight: "700",
+    });
+    screenEyedropperButton.textContent = "⌾ 屏幕取色";
+    const colorHeaderActions = document.createElement("div");
+    Object.assign(colorHeaderActions.style, {display: "flex", alignItems: "center", gap: "7px"});
+    colorHeaderActions.append(screenEyedropperButton, customColorWrapper);
+    colorHeader.appendChild(colorHeaderActions);
 
     const spacer = document.createElement("div");
     spacer.style.flex = "1";
@@ -1205,7 +1405,7 @@ function openDrawingEditor(node) {
     groupActionRow.append(createGroupButton, ungroupButton);
     Object.assign(sizeLabel.style, {width: "100%", flexWrap: "wrap", boxSizing: "border-box"});
     sizeInput.style.width = "100%";
-    for (const control of [smoothingToggleLabel, smoothingStrengthLabel, drawingScaleControl]) {
+    for (const control of [smoothingToggleLabel, smoothingStrengthLabel, smartRegularizeToggleLabel, regularizeSensitivityLabel, drawingScaleControl]) {
         Object.assign(control.style, {width: "100%", height: "auto", minHeight: "34px", flexWrap: "wrap", boxSizing: "border-box"});
     }
     Object.assign(mirrorToggleLabel.style, {
@@ -1221,6 +1421,7 @@ function openDrawingEditor(node) {
     Object.assign(mirrorIcon.style, {fontSize: "14px", lineHeight: "14px", fontWeight: "700"});
     mirrorToggleLabel.prepend(mirrorIcon);
     smoothingStrengthInput.style.width = "100%";
+    regularizeSensitivityInput.style.width = "100%";
     drawingScaleRange.style.width = "100%";
     resetDrawingScaleButton.style.width = "100%";
     for (const button of [optimizeSelectedButton, optimizeAllButton, undoButton, redoButton, clearButton]) {
@@ -1232,7 +1433,8 @@ function openDrawingEditor(node) {
     Object.assign(undoButton.style, {background: "#244A70", borderColor: "#4DA3FF"});
     Object.assign(clearButton.style, {background: "#512B2B", borderColor: "#D85A5A"});
     rightPanel.append(
-        commandSection, layersTitle, groupActionRow, layerList, propertiesTitle, colorGroup, sizeLabel, smoothingToggleLabel, smoothingStrengthLabel,
+        commandSection, layersTitle, groupActionRow, layerList, propertiesTitle, colorGroup, sizeLabel,
+        smartRegularizeToggleLabel, regularizeSensitivityLabel, smoothingToggleLabel, smoothingStrengthLabel,
         optimizeSelectedButton, optimizeAllButton, drawingScaleControl,
         historyRow,
     );
@@ -1249,6 +1451,7 @@ function openDrawingEditor(node) {
     });
     const canvas = document.createElement("canvas");
     const artworkCanvas = document.createElement("canvas");
+    const visibilityGuideCanvas = document.createElement("canvas");
     Object.assign(canvas.style, {
         display: "block", touchAction: "none", cursor: "crosshair",
         boxShadow: "0 10px 38px rgba(0,0,0,.45)", outline: "1px solid #454B55",
@@ -1321,6 +1524,10 @@ function openDrawingEditor(node) {
     function defaultLayerName(stroke, index) {
         if (stroke?.layerName) return String(stroke.layerName);
         if (stroke?.shape) return `${stroke.shape === "circle" ? "圆形" : stroke.shape === "square" ? "方形" : stroke.shape === "star" ? "星形" : "多边形"} ${index + 1}`;
+        if (stroke?.regularizedKind) {
+            const labels = {line: "智能直线", circle: "智能圆形", ellipse: "智能椭圆", arc: "智能圆弧"};
+            return `${labels[stroke.regularizedKind] || "智能规整"} ${index + 1}`;
+        }
         if (stroke?.tool === "lasso") return `套索填充 ${index + 1}`;
         if (stroke?.tool === "eraser") return `橡皮 ${index + 1}`;
         if (stroke?.brushType === "pencil") return `铅笔 ${index + 1}`;
@@ -1665,8 +1872,8 @@ function openDrawingEditor(node) {
         customColorWrapper.title = customColor.title;
         undoButton.disabled = undoStack.length === 0 && drawing.strokes.length === 0 && Math.abs(drawingScale - 1) < 0.0001;
         redoButton.disabled = redoStack.length === 0;
-        optimizeAllButton.disabled = !drawing.strokes.some((stroke) => stroke?.tool !== "lasso" && !stroke?.shape && stroke?.points?.length >= 3);
-        optimizeSelectedButton.disabled = !selectedStroke || selectedStroke.tool === "lasso" || selectedStroke.shape || selectedStroke.points?.length < 3;
+        optimizeAllButton.disabled = !drawing.strokes.some((stroke) => stroke?.tool !== "lasso" && !stroke?.shape && !stroke?.regularizedKind && stroke?.points?.length >= 3);
+        optimizeSelectedButton.disabled = !selectedStroke || selectedStroke.tool === "lasso" || selectedStroke.shape || selectedStroke.regularizedKind || selectedStroke.points?.length < 3;
         drawingScaleRange.disabled = drawing.strokes.length === 0;
         undoButton.style.opacity = undoButton.disabled ? "0.45" : "1";
         redoButton.style.opacity = redoButton.disabled ? "0.45" : "1";
@@ -1676,9 +1883,9 @@ function openDrawingEditor(node) {
         colorButtons.forEach((button, index) => {
             button.style.borderColor = activeColor === COLORS[index] && tool !== "eraser" ? "#FFFFFF" : "transparent";
         });
-        eyedropperColorButton.style.background = eyedropperColor;
-        eyedropperColorButton.style.borderColor = activeColor === eyedropperColor && tool !== "lasso" ? "#FFFFFF" : "transparent";
-        eyedropperColorButton.title = `吸管保存颜色 ${eyedropperColor}，点击重新使用`;
+        savedColorButtons.forEach((button, index) => {
+            button.style.borderColor = activeColor === savedColors[index] && tool !== "eraser" ? "#FFFFFF" : "transparent";
+        });
         canvas.style.cursor = tool === "move"
             ? (imageDrag ? "grabbing" : "grab")
             : tool === "select"
@@ -1695,6 +1902,12 @@ function openDrawingEditor(node) {
         smoothingToggleLabel.style.borderColor = smoothingToggle.checked ? "#39C77A" : "#59616D";
         smoothingToggleLabel.style.background = smoothingToggle.checked ? "#173C2A" : "#252A31";
         smoothingStrengthText.textContent = `强度 ${Math.round(smoothingStrength)}%`;
+        smartRegularizeText.textContent = smartRegularizeToggle.checked ? "智能规整：开" : "智能规整：关";
+        smartRegularizeToggleLabel.style.borderColor = smartRegularizeToggle.checked ? "#2387FF" : "#59616D";
+        smartRegularizeToggleLabel.style.background = smartRegularizeToggle.checked ? "#153A63" : "#252A31";
+        regularizeSensitivityText.textContent = `识别灵敏度 ${Math.round(regularizeSensitivity)}%`;
+        regularizeSensitivityLabel.style.opacity = smartRegularizeToggle.checked ? "1" : "0.45";
+        regularizeSensitivityInput.disabled = !smartRegularizeToggle.checked;
         drawingScaleText.textContent = `图形 ${Math.round(drawingScale * 100)}%`;
         shapeSidesLabel.style.display = shapeType === "polygon" || shapeType === "star" ? "flex" : "none";
         if (!currentStroke && tool === "group") {
@@ -1785,14 +1998,22 @@ function openDrawingEditor(node) {
         for (const stroke of visibleStrokes) {
             drawStroke(drawingContext, stroke, canvas.width, canvas.height);
         }
+        let previewStroke = null;
         if (currentStroke) {
-            const previewStroke = smoothingToggle.checked && currentStroke.tool !== "lasso" && !currentStroke.shape
+            previewStroke = smoothingToggle.checked && currentStroke.tool !== "lasso" && !currentStroke.shape
                 ? {...currentStroke, points: smoothWithCurrentStrength(currentStroke.points)}
                 : currentStroke;
             drawStroke(drawingContext, previewStroke, canvas.width, canvas.height, true);
         }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(artworkCanvas, 0, 0);
+        drawStrokeVisibilityGuides(
+            ctx,
+            previewStroke ? [...visibleStrokes, previewStroke] : visibleStrokes,
+            canvas.width,
+            canvas.height,
+            visibilityGuideCanvas,
+        );
         if (selectedStrokeIndex >= 0 && selectedStrokeIndex < visibleStrokes.length && visibleStrokes[selectedStrokeIndex]?.visible !== false) {
             drawStrokeSelection(ctx, visibleStrokes[selectedStrokeIndex], canvas.width, canvas.height);
             if (tool === "select") {
@@ -1862,14 +2083,7 @@ function openDrawingEditor(node) {
             const ctx = artworkCanvas.getContext("2d", {willReadFrequently: true});
             const pixel = ctx.getImageData(sampleX, sampleY, 1, 1).data;
             const sampledColor = rgbaToHex(pixel[0], pixel[1], pixel[2]);
-            brushColor = rememberBrushColor(node, drawing, sampledColor);
-            eyedropperColor = rememberEyedropperColor(node, drawing, sampledColor);
-            tool = "brush";
-            selectedStrokeIndex = -1;
-            refreshControls();
-            render();
-            statusMessage.textContent = `已吸取颜色 ${sampledColor}，已保存到画笔颜色`;
-            statusMessage.style.color = "#39FF88";
+            applyPickedColor(sampledColor, "已从画布吸取颜色");
         } catch (_) {
             statusMessage.textContent = "当前画面无法读取颜色，请等待输入图预览加载完成";
             statusMessage.style.color = "#FF9B73";
@@ -2271,6 +2485,7 @@ function openDrawingEditor(node) {
         }
         canvas.releasePointerCapture?.(event.pointerId);
         const canSave = currentStroke.tool !== "lasso" || updateLassoClosure(currentStroke);
+        let regularizedKind = "";
         if (canSave) {
             if (!currentStrokeHasHistory) {
                 recordHistory();
@@ -2278,8 +2493,17 @@ function openDrawingEditor(node) {
             if (currentStroke.tool === "lasso") {
                 currentStroke.points[currentStroke.points.length - 1] = [...currentStroke.points[0]];
                 delete currentStroke.canClose;
-            } else if (!currentStroke.shape && smoothingToggle.checked && currentStroke.points.length >= 3) {
-                currentStroke.points = smoothWithCurrentStrength(currentStroke.points);
+            } else if (!currentStroke.shape) {
+                const regularized = smartRegularizeToggle.checked && currentStroke.tool === "brush"
+                    ? regularizeStrokePoints(currentStroke.points, canvas.width, canvas.height, regularizeSensitivity)
+                    : null;
+                if (regularized) {
+                    currentStroke.points = regularized.points;
+                    currentStroke.regularizedKind = regularized.kind;
+                    regularizedKind = regularized.kind;
+                } else if (smoothingToggle.checked && currentStroke.points.length >= 3) {
+                    currentStroke.points = smoothWithCurrentStrength(currentStroke.points);
+                }
             }
             drawing.strokes.push(currentStroke);
         } else {
@@ -2291,6 +2515,11 @@ function openDrawingEditor(node) {
         render();
         if (canSave) {
             refreshControls();
+            if (regularizedKind) {
+                const labels = {line: "直线", circle: "圆形", ellipse: "椭圆", arc: "圆弧"};
+                statusMessage.textContent = `已规整为${labels[regularizedKind] || "标准图形"}，可撤销恢复`;
+                statusMessage.style.color = "#39FF88";
+            }
         } else {
             window.setTimeout(refreshControls, 1400);
         }
@@ -2308,11 +2537,14 @@ function openDrawingEditor(node) {
 
     function saveDrawing(runAfterSave = false, requestedQueueCount = 1) {
         commitDrawingScale();
-        drawing.version = 5;
+        drawing.version = 7;
         drawing.smoothing = smoothingToggle.checked;
         drawing.smoothingStrength = Math.round(smoothingStrength);
+        drawing.smartRegularize = smartRegularizeToggle.checked;
+        drawing.regularizeSensitivity = Math.round(regularizeSensitivity);
         drawing.brushColor = brushColor;
         drawing.eyedropperColor = eyedropperColor;
+        drawing.savedColors = savedColors;
         drawing.brushType = brushType;
         drawing.inputVisible = inputLayerToggle.checked;
         node.__jindouyunInputVisible = drawing.inputVisible;
@@ -2377,6 +2609,11 @@ function openDrawingEditor(node) {
 
     function onKeyDown(event) {
         if (event.key === "Escape") {
+            // Let the browser cancel its own screen picker without closing this editor.
+            if (screenEyedropperActive) {
+                event.stopPropagation();
+                return;
+            }
             if (isNativeColorPickerEscape(event)) {
                 blockEditorShortcut(event);
                 nativeColorPickerActive = false;
@@ -2448,6 +2685,45 @@ function openDrawingEditor(node) {
         groupSelection = null;
         refreshControls();
         render();
+    });
+    screenEyedropperButton.addEventListener("click", async () => {
+        if (screenEyedropperActive) return;
+        if (typeof window.EyeDropper !== "function") {
+            statusMessage.textContent = "当前浏览器不支持屏幕取色，请使用左侧画布吸管";
+            statusMessage.style.color = "#FF9B73";
+            return;
+        }
+        screenEyedropperActive = true;
+        screenEyedropperButton.disabled = true;
+        screenEyedropperButton.textContent = "⌾ 取色中…";
+        screenEyedropperButton.title = "屏幕取色已开启，请移动到目标颜色后单击";
+        screenEyedropperButton.style.background = "#1D5C9C";
+        screenEyedropperButton.style.cursor = "wait";
+        screenEyedropperButton.setAttribute("aria-busy", "true");
+        statusMessage.textContent = "屏幕取色已开启，请将鼠标移到目标颜色后单击";
+        statusMessage.style.color = "#79B7FF";
+        try {
+            const result = await new window.EyeDropper().open();
+            const selectedColor = normalizeColor(result?.sRGBHex, "");
+            if (!selectedColor) throw new Error("屏幕取色没有返回有效颜色");
+            applyPickedColor(selectedColor, "已从屏幕吸取颜色");
+        } catch (error) {
+            if (error?.name === "AbortError") {
+                statusMessage.textContent = "已取消屏幕取色";
+                statusMessage.style.color = "#AEB6C2";
+            } else {
+                statusMessage.textContent = "屏幕取色没有成功，请重新尝试";
+                statusMessage.style.color = "#FF9B73";
+            }
+        } finally {
+            screenEyedropperActive = false;
+            screenEyedropperButton.disabled = false;
+            screenEyedropperButton.textContent = "⌾ 屏幕取色";
+            screenEyedropperButton.title = "直接吸取屏幕任意位置的颜色并自动新增颜色球";
+            screenEyedropperButton.style.background = "#153A63";
+            screenEyedropperButton.style.cursor = "pointer";
+            screenEyedropperButton.removeAttribute("aria-busy");
+        }
     });
     eraserButton.addEventListener("click", () => { tool = "eraser"; selectedStrokeIndex = -1; refreshControls(); render(); });
     lassoButton.addEventListener("click", () => { tool = "lasso"; selectedStrokeIndex = -1; refreshControls(); render(); });
@@ -2556,6 +2832,18 @@ function openDrawingEditor(node) {
         smoothingStrength = clamp(smoothingStrengthInput.value, 0, 100);
         drawing.smoothingStrength = Math.round(smoothingStrength);
         smoothingStrengthText.textContent = `强度 ${Math.round(smoothingStrength)}%`;
+        render();
+    });
+    smartRegularizeToggle.addEventListener("change", () => {
+        smartRegularizeEnabled = smartRegularizeToggle.checked;
+        drawing.smartRegularize = smartRegularizeEnabled;
+        refreshControls();
+        render();
+    });
+    regularizeSensitivityInput.addEventListener("input", () => {
+        regularizeSensitivity = clamp(regularizeSensitivityInput.value, 0, 100);
+        drawing.regularizeSensitivity = Math.round(regularizeSensitivity);
+        regularizeSensitivityText.textContent = `识别灵敏度 ${Math.round(regularizeSensitivity)}%`;
         render();
     });
     optimizeSelectedButton.addEventListener("click", () => {

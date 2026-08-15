@@ -1,0 +1,57 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+
+const source = await fs.readFile(new URL("../js/jindouyun_save_image.js", import.meta.url), "utf8");
+
+assert.match(source, /const NODE_TYPE = "JindouyunSaveImage"/);
+assert.match(source, /makeButton\("浏览"/);
+assert.match(source, /makeButton\("打开文件夹"/);
+assert.match(source, /makeButton\("新建并进入"/);
+assert.match(source, /\/jindouyun_design\/select_save_folder/);
+assert.match(source, /\/jindouyun_design\/create_folder/);
+assert.match(source, /\/jindouyun_design\/open_folder/);
+assert.match(source, /\/jindouyun_design\/delete_saved_image/);
+assert.match(source, /browseRow\.append\(browseButton, openFolderButton\)/);
+assert.match(source, /node\.addDOMWidget\("保存目录管理"/);
+assert.match(source, /setWidgetValue\(overrideWidget, result\.path, node\)/);
+assert.match(source, /message\?\.save_directory/);
+assert.match(source, /node\.__jindouyunLastSaveDirectory/);
+assert.match(source, /connectedLoadImageDirectory/);
+assert.match(source, /originNode\.comfyClass \|\| originNode\.type/);
+assert.match(source, /findWidget\(node, "目录覆盖"\)/);
+assert.match(source, /pathWidget\?\.options\?\.default/);
+assert.match(source, /setWidgetValue\(pathWidget, defaultDirectory, node\)/);
+assert.match(source, /makeButton\("跟随输入"/);
+assert.match(source, /已进入：/);
+assert.match(source, /保存成功：/);
+assert.match(source, /新建失败：/);
+assert.match(source, /function hideInternalWidget/);
+assert.match(source, /pathTailText\.readOnly = true/);
+assert.match(source, /pathTailText\.scrollLeft = pathTailText\.scrollWidth/);
+assert.match(source, /new ResizeObserver/);
+assert.match(source, /featuredPreviewRects/);
+assert.match(source, /containImageRect/);
+assert.match(source, /patchFeaturedPreview/);
+assert.match(source, /drawFeaturedPreview/);
+assert.match(source, /ensureFeaturedPreviewWidget/);
+assert.match(source, /addCustomWidget\(previewWidget\)/);
+assert.match(source, /name: "最近保存预览"/);
+assert.match(source, /pathTailText/);
+assert.match(source, /updatePathTail/);
+assert.match(source, /selectedIndex/);
+assert.match(source, /drawTrashButton/);
+assert.match(source, /deleteSelectedPreview/);
+assert.match(source, /deleteAnimation/);
+assert.match(source, /已移入回收站/);
+assert.match(source, /setFeaturedPreviewImages/);
+assert.match(source, /node\.__jindouyunRecentImages = entries\.map/);
+assert.match(source, /node\.imgs = \[\]/);
+assert.doesNotMatch(source, /node\.imgs = entries\.map/);
+assert.match(source, /ownerNode\.__jindouyunRecentImages/);
+
+const initSource = await fs.readFile(new URL("../__init__.py", import.meta.url), "utf8");
+assert.match(initSource, /"JindouyunSaveImage": JindouyunSaveImage/);
+assert.match(initSource, /"JindouyunSaveImage": "筋斗云-保存图像"/);
+assert.match(initSource, /routes\.post\("\/jindouyun_design\/delete_saved_image"\)/);
+
+console.log("save image UI test passed");

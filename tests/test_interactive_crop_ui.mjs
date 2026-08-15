@@ -4,6 +4,17 @@ import fs from "node:fs/promises";
 const path = new URL("../js/jindouyun_interactive_crop.js", import.meta.url);
 const source = await fs.readFile(path, "utf8");
 
+assert.match(source, /const UPLOAD_BUTTON_HEIGHT = 42/);
+assert.match(source, /function patchUploadButton\(node\)/);
+assert.match(source, /item\.type === "button"/);
+assert.match(source, /item\.constructor\?\.name === "ButtonWidget"/);
+assert.match(source, /选择\.\*上传\|choose\.\*upload/);
+assert.match(source, /widget\.label = "选择要上传的图片"/);
+assert.match(source, /ctx\.roundRect\(left, top, buttonWidth, buttonHeight, 6\)/);
+assert.match(source, /ctx\.fillStyle = pressed \? "#1F6B43" : hovered \? "#3EAF72" : "#2E8B57"/);
+assert.match(source, /ctx\.strokeStyle = hovered \? "#9AF0B8" : "#61C98A"/);
+assert.match(source, /patchUploadButton\(node\);/);
+
 function loadRotationGeometry(script) {
     const normalize = script.match(/function normalizeRotationDegrees\(value\) \{[\s\S]*?\n\}/)?.[0];
     const rotatedSize = script.match(/function rotatedImageSize\(width, height, angle\) \{[\s\S]*?\n\}/)?.[0];
@@ -62,10 +73,46 @@ function loadCropPanelWidthHelper(script) {
     return Function(`${helper}\nreturn {syncCropPanelWidth};`)();
 }
 
+function loadBoxSelectHelpers(script) {
+    const pointInRect = script.match(/function pointInRect\(rect, x, y\) \{[\s\S]*?\n\}/)?.[0];
+    const fullCrop = script.match(/function isFullCrop\(crop\) \{[\s\S]*?\n\}/)?.[0];
+    const shouldCreate = script.match(/function shouldCreateCropFromPointer\(crop, rect, x, y, boxSelectArmed, forceCreate = false\) \{[\s\S]*?\n\}/)?.[0];
+    assert.ok(pointInRect && fullCrop && shouldCreate, "box select decision helpers must be defined");
+    return Function(`${pointInRect}\n${fullCrop}\n${shouldCreate}\nreturn {isFullCrop, shouldCreateCropFromPointer};`)();
+}
+
 assert.match(source, /const NODE_TYPE = "JindouyunInteractiveCrop"/);
+assert.match(source, /const CROP_PANEL_HEIGHT = 525/);
 assert.match(source, /自由比例/);
 assert.match(source, /const canvasShell = document\.createElement\("div"\)/);
+assert.match(source, /const previewWorkspace = document\.createElement\("div"\)/);
+assert.match(source, /previewWorkspace\.dataset\.layout = "crop-side-tools"/);
+assert.match(source, /gridTemplateColumns: "86px minmax\(140px, 1fr\) 86px"/);
+assert.match(source, /const leftToolRail = makeToolRail\("left", "旋转与镜像"\)/);
+assert.match(source, /const rightToolRail = makeToolRail\("right", "图片变形"\)/);
+assert.match(source, /leftToolRail\.append\(rotationRow, mirrorRow\)/);
+assert.match(source, /rightToolRail\.append\(transformRow\)/);
+assert.match(source, /previewWorkspace\.append\(leftToolRail, canvasShell, rightToolRail\)/);
+assert.match(source, /wrapper\.append\(maxEdgeGroup, splitRow, controlRow, previewWorkspace, status\)/);
+assert.doesNotMatch(source, /wrapper\.append\(maxEdgeGroup, rotationRow, mirrorRow, transformRow/);
 assert.match(source, /canvas\.addEventListener\("pointerdown"/);
+assert.match(source, /const boxSelectButton = makeButton\("▣ 框选"/);
+assert.match(source, /function setBoxSelectArmed\(active\)/);
+assert.match(source, /let boxSelectArmed = true/);
+assert.match(source, /setBoxSelectArmed\(true\)/);
+assert.match(source, /shouldCreateCropFromPointer\(/);
+assert.match(source, /previous: \{\.\.\.crop\}/);
+assert.match(source, /distance >= 3/);
+assert.match(source, /boxSelectButton\.addEventListener\("click"/);
+assert.doesNotMatch(source, /setBoxSelectArmed\(false\)/);
+assert.match(source, /boxSelectButton\.style\.background = "#252A31"/);
+assert.match(source, /boxSelectButton\.style\.borderColor = boxSelectArmed \? "#7EE787" : "#48515D"/);
+assert.match(source, /aspectLockButton\.style\.borderColor = aspectLocked \? "#A78BFA" : "#6D5A91"/);
+assert.match(source, /branchBadge\.style\.borderColor = branchMatches \? "#52C878" : "#F472B6"/);
+assert.match(source, /branchBadge\.style\.color = branchMatches \? "#8FF0A4" : "#F9A8D4"/);
+assert.match(source, /ctx\.strokeStyle = "#7EE787"/);
+assert.doesNotMatch(source, /boxSelectButton\.style\.background = boxSelectArmed \? "#D96522"/);
+assert.doesNotMatch(source, /aspectLockButton\.style\.background = aspectLocked \? "#D96622"/);
 assert.match(source, /resizeCropFree/);
 assert.match(source, /resizeCropWithRatio/);
 assert.match(source, /原始裁剪 \$\{pixels\.width\} × \$\{pixels\.height\}/);
@@ -122,7 +169,7 @@ assert.match(source, /scheduleCropSourceRefresh/);
 assert.match(source, /refreshSource\(\{quiet: Boolean\(source\)\}\)/);
 assert.match(source, /uploadImageUrl\(node\)/);
 assert.match(source, /setWidgetValue\(dataWidget, serializeCrop\(crop, ratioLock\), node\)/);
-assert.match(source, /getMinHeight: \(\) => 625/);
+assert.match(source, /getMinHeight: \(\) => CROP_PANEL_HEIGHT/);
 assert.match(source, /patchNativeImagePreview/);
 assert.doesNotMatch(source, /makeButton\("✂ 打开交互裁剪"/);
 assert.match(source, /nodeData\.name !== NODE_TYPE/);
@@ -133,6 +180,10 @@ assert.match(source, /function drawCheckerboard/);
 assert.match(source, /findWidget\(node, "图片旋转"\)/);
 assert.match(source, /findWidget\(node, "左右镜像"\)/);
 assert.match(source, /findWidget\(node, "上下镜像"\)/);
+assert.match(source, /function syncPreviewTransformFromWidgets\(\)/);
+assert.match(source, /mirrorHorizontal = widgetBooleanValue\(horizontalMirrorWidget\?\.value\)/);
+assert.match(source, /mirrorVertical = widgetBooleanValue\(verticalMirrorWidget\?\.value\)/);
+assert.match(source, /syncPreviewTransformFromWidgets\(\);\s+updateRotation\(rotationWidget\?\.value/);
 assert.match(source, /const mirrorHorizontalButton = makeButton\("↔ 左右"/);
 assert.match(source, /const mirrorVerticalButton = makeButton\("↕ 上下"/);
 assert.match(source, /function hideMirrorWidgets/);
@@ -162,7 +213,7 @@ assert.match(source, /rotationNumber\.addEventListener\("input", \(\) => \{/);
 assert.match(source, /rotationNumber\.validity\?\.badInput/);
 assert.match(source, /if \(parsedRotation !== null\) updateRotation\(parsedRotation\);/);
 assert.match(source, /rotationNumber\.value = String\(rotation\);/);
-assert.match(source, /height: "625px"/);
+assert.match(source, /height: `\$\{CROP_PANEL_HEIGHT\}px`/);
 assert.match(source, /height: "338px"/);
 assert.match(source, /minHeight: "338px"/);
 assert.match(source, /旋转 \$\{[^}]+\}°/);
@@ -186,7 +237,7 @@ assert.match(source, /wrapper\.addEventListener\("drop"/);
 assert.match(source, /if \(!rotationAvailable\) return false;/);
 assert.match(source, /if \(rotationAvailable\) \{\s+const rotationHandle = rotationHandlePosition\(\);/);
 assert.match(source, /ctx\.setLineDash\(\[4, 4\]\);/);
-assert.match(source, /ctx\.strokeStyle = "rgba\(245, 158, 11, 0\.35\)";/);
+assert.match(source, /ctx\.strokeStyle = "rgba\(78, 161, 255, 0\.42\)";/);
 assert.match(
     source,
     /ctx\.moveTo\(canvas\.width \/ 2, canvas\.height \/ 2\);\s+ctx\.lineTo\(rotationHandle\.x, rotationHandle\.y\);/,
@@ -264,5 +315,13 @@ assert.equal(cropPanelWrapper.style.maxWidth, "352px");
 assert.equal(cropPanelHost.style.width, "352px");
 assert.equal(cropPanelHost.style.maxWidth, "352px");
 assert.equal(syncCropPanelWidth({size: [224, 686]}, cropPanelWrapper), 196);
+
+const {isFullCrop, shouldCreateCropFromPointer} = loadBoxSelectHelpers(source);
+const previewRect = {left: 20, top: 20, right: 80, bottom: 80};
+assert.equal(isFullCrop({x: 0, y: 0, width: 1, height: 1}), true);
+assert.equal(shouldCreateCropFromPointer({x: 0, y: 0, width: 1, height: 1}, previewRect, 50, 50, true), true);
+assert.equal(shouldCreateCropFromPointer({x: .2, y: .2, width: .6, height: .6}, previewRect, 50, 50, true), false);
+assert.equal(shouldCreateCropFromPointer({x: .2, y: .2, width: .6, height: .6}, previewRect, 10, 10, true), true);
+assert.equal(shouldCreateCropFromPointer({x: .2, y: .2, width: .6, height: .6}, previewRect, 50, 50, true, true), true);
 
 console.log("interactive crop UI source test passed");

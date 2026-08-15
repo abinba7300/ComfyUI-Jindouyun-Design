@@ -330,6 +330,10 @@ class Krea2RandomLoraLogicTests(unittest.TestCase):
                 "筋斗云随机LORA",
             )
             self.assertEqual(
+                module.NODE_DISPLAY_NAME_MAPPINGS["JindouyunStringRouter"],
+                "筋斗云-提示词",
+            )
+            self.assertEqual(
                 module.NODE_CLASS_MAPPINGS["JindouyunRandomLora"].CATEGORY,
                 "筋斗云设计/LoRA",
             )
@@ -342,6 +346,18 @@ class Krea2RandomLoraLogicTests(unittest.TestCase):
             self.assertFalse(getattr(module.NODE_CLASS_MAPPINGS["JindouyunRandomLora"], "DEPRECATED", False))
             self.assertNotIn("筋斗云", module.NODE_DISPLAY_NAME_MAPPINGS["Krea2RandomLoraAuto"])
             self.assertNotIn("筋斗云", module.NODE_DISPLAY_NAME_MAPPINGS["Krea2RandomLoraModelOnly"])
+
+            node_class = module.NODE_CLASS_MAPPINGS["JindouyunRandomLora"]
+            self.assertEqual(
+                node_class.RETURN_NAMES,
+                ("模型", "触发词", "LoRA名称", "本次种子", "LoRA强度", "重绘值", "组合名"),
+            )
+            self.assertNotIn("启用", node_class.INPUT_TYPES()["required"])
+            self.assertEqual(next(iter(node_class.INPUT_TYPES()["required"])), "模型")
+            parent_class = node_class.__mro__[1]
+            with patch.object(parent_class, "load_lora", return_value=("loaded",)) as load_lora:
+                self.assertEqual(node_class().load_lora(**{"启用": False}), ("loaded",))
+            self.assertTrue(load_lora.call_args.kwargs["启用"])
         finally:
             sys.modules.pop(module_name, None)
 

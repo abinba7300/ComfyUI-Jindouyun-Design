@@ -97,9 +97,7 @@ def resolve_layer_size(
     scale_mode: str = "适应画布",
     canvas_percent: float = 90.0,
 ) -> Tuple[int, int]:
-    safe_scale = max(0.01, float(scale))
-    if safe_scale > 10.0:
-        safe_scale = 1.0
+    safe_scale = max(0.01, min(CANVAS_PERCENT_MAX / 100.0, float(scale)))
 
     mode = str(scale_mode or "适应画布")
     if mode not in SCALE_MODES:
@@ -122,10 +120,6 @@ def resolve_layer_size(
         base_scale = min(1.0, canvas_width / max(1, image_width), canvas_height / max(1, image_height))
         target_width = max(1, round(image_width * base_scale * safe_scale))
         target_height = max(1, round(image_height * base_scale * safe_scale))
-        edge_fit = min(1.0, canvas_width / target_width, canvas_height / target_height)
-        if edge_fit < 1.0:
-            target_width = max(1, round(target_width * edge_fit))
-            target_height = max(1, round(target_height * edge_fit))
 
     return target_width, target_height
 
