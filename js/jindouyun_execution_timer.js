@@ -12,6 +12,10 @@ const STYLE_ID = "jindouyun-execution-timer-style";
 const POSITION_KEY = "jindouyun.executionTimer.position";
 const SOUND_KEY = "jindouyun.executionTimer.soundEnabled";
 const VIEWPORT_GAP = 12;
+const COMPLETION_SOUND_URL = new URL(
+    "./assets/toaster-oven-ding-sethlind-cc0.mp3",
+    import.meta.url,
+).href;
 
 const timerState = createExecutionTimerState();
 let timerElement = null;
@@ -20,6 +24,8 @@ let statusElement = null;
 let soundButton = null;
 let animationFrame = null;
 let audioContext = null;
+let completionSoundBuffer = null;
+let completionSoundPromise = null;
 let executionEventsBound = false;
 let soundEnabled = readStoredBoolean(SOUND_KEY, true);
 
@@ -218,22 +224,41 @@ function ensureAudioContext() {
     return audioContext;
 }
 
+function loadCompletionSound(context) {
+    if (completionSoundBuffer) return Promise.resolve(completionSoundBuffer);
+    if (completionSoundPromise) return completionSoundPromise;
+
+    completionSoundPromise = fetch(COMPLETION_SOUND_URL)
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error(`Completion sound request failed: ${response.status}`);
+            }
+            return response.arrayBuffer();
+        })
+        .then((audioData) => context.decodeAudioData(audioData))
+        .then((buffer) => {
+            completionSoundBuffer = buffer;
+            return buffer;
+        })
+        .catch((error) => {
+            completionSoundPromise = null;
+            throw error;
+        });
+
+    return completionSoundPromise;
+}
+
 async function unlockAudio() {
     const context = ensureAudioContext();
     if (context?.state === "suspended") {
         await context.resume().catch(() => {});
     }
+    if (context?.state === "running" && soundEnabled) {
+        loadCompletionSound(context).catch(() => {});
+    }
 }
 
-async function playCompletionChime() {
-    if (!soundEnabled) return;
-    const context = ensureAudioContext();
-    if (!context) return;
-    if (context.state === "suspended") {
-        await context.resume().catch(() => {});
-    }
-    if (context.state !== "running") return;
-
+function playFallbackChime(context) {
     const startAt = context.currentTime + 0.015;
     const master = context.createGain();
     master.gain.setValueAtTime(0.0001, startAt);
@@ -256,6 +281,29 @@ async function playCompletionChime() {
         gain.connect(master);
         oscillator.start(startAt);
         oscillator.stop(startAt + duration + 0.03);
+    }
+}
+
+async function playCompletionChime() {
+    if (!soundEnabled) return;
+    const context = ensureAudioContext();
+    if (!context) return;
+    if (context.state === "suspended") {
+        await context.resume().catch(() => {});
+    }
+    if (context.state !== "running") return;
+
+    try {
+        const buffer = await loadCompletionSound(context);
+        const source = context.createBufferSource();
+        const output = context.createGain();
+        source.buffer = buffer;
+        output.gain.setValueAtTime(1, context.currentTime);
+        source.connect(output);
+        output.connect(context.destination);
+        source.start(context.currentTime + 0.01);
+    } catch {
+        playFallbackChime(context);
     }
 }
 

@@ -99,3 +99,35 @@ Expected: 全部通过。
 - [ ] **Step 3: 检查变更范围**
 
 确认只包含本功能文件与文档，不包含用户已有的 `js/jindouyun_load_image.js` 修改。
+
+### Task 4: 替换为真实面包机完成铃声
+
+**Files:**
+- Create: `js/assets/toaster-oven-ding-sethlind-cc0.mp3`
+- Create: `js/assets/README.md`
+- Modify: `js/jindouyun_execution_timer.js`
+- Modify: `tests/test_execution_timer_ui.mjs`
+
+**Interfaces:**
+- Consumes: CC0 本地音频 URL。
+- Produces: `loadCompletionSound(context)` 解码缓存与真实音频播放，合成音仅作失败回退。
+
+- [ ] **Step 1: 扩展前端测试**
+
+断言音频资源存在且非空，扩展通过 `fetch()`、`decodeAudioData()` 和 `createBufferSource()` 播放真实声音。
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `node tests/test_execution_timer_ui.mjs`
+
+Expected: FAIL，因为真实音效资源和加载逻辑尚不存在。
+
+- [ ] **Step 3: 内置并接入 CC0 音效**
+
+保存来源及许可说明，缓存解码后的 `AudioBuffer`，成功事件从头播放一次；资源失败时调用原合成铃声。
+
+- [ ] **Step 4: 运行测试与浏览器验证**
+
+Run: `node tests/test_execution_timer_ui.mjs`
+
+Expected: PASS；ComfyUI 页面能请求音频资源且无控制台错误。

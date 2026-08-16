@@ -25,6 +25,10 @@ assert.match(source, /performance\.now\(\)/);
 assert.match(source, /requestAnimationFrame/);
 assert.match(source, /cancelAnimationFrame/);
 assert.match(source, /AudioContext|webkitAudioContext/);
+assert.match(source, /toaster-oven-ding-sethlind-cc0\.mp3/);
+assert.match(source, /fetch\(/);
+assert.match(source, /decodeAudioData/);
+assert.match(source, /createBufferSource/);
 assert.match(source, /createOscillator/);
 assert.match(source, /exponentialRampToValueAtTime/);
 assert.match(source, /if \(finalStatus === "success"\)/);
@@ -42,5 +46,19 @@ assert.match(source, /运行中/);
 assert.match(source, /完成/);
 assert.match(source, /失败/);
 assert.match(source, /已中断/);
+
+const soundAsset = new URL(
+    "../js/assets/toaster-oven-ding-sethlind-cc0.mp3",
+    import.meta.url,
+);
+const soundStat = await fs.stat(soundAsset);
+assert.ok(soundStat.size > 20_000, "CC0 toaster ding asset should be bundled");
+
+const soundCredits = await fs.readFile(
+    new URL("../js/assets/README.md", import.meta.url),
+    "utf8",
+);
+assert.match(soundCredits, /CC0/);
+assert.match(soundCredits, /freesound\.org\/people\/sethlind\/sounds\/265012/);
 
 console.log("execution timer UI tests passed");
