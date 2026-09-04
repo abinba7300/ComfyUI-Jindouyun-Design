@@ -8,7 +8,9 @@ import {
 
 
 const NODE_TYPE = "JindouyunMultimodalLLM";
-const PANEL_HEIGHT = 550;
+const MIN_PANEL_HEIGHT = 550;
+const MIN_NODE_HEIGHT = 790;
+const PANEL_VERTICAL_OFFSET = MIN_NODE_HEIGHT - MIN_PANEL_HEIGHT;
 const PROVIDER_STORAGE_KEY = "jindouyun.multimodal.provider";
 const API_KEYS_STORAGE_KEY = "jindouyun.multimodal.apiKeys";
 const BASE_URLS_STORAGE_KEY = "jindouyun.multimodal.baseUrls";
@@ -111,6 +113,8 @@ function makeTextarea(placeholder) {
         width: "100%",
         minWidth: "0",
         height: "58px",
+        minHeight: "58px",
+        flex: "1 1 58px",
         resize: "none",
         boxSizing: "border-box",
         border: "1px solid #505967",
@@ -124,6 +128,29 @@ function makeTextarea(placeholder) {
         outline: "none",
     });
     return textarea;
+}
+
+function syncPanelSize(node, wrapper, requestedWidth) {
+    const panelWidth = Math.max(
+        320,
+        Number(requestedWidth || node.size?.[0] || 440) - 24,
+    );
+    const panelHeight = Math.max(
+        MIN_PANEL_HEIGHT,
+        Number(node.size?.[1] || MIN_NODE_HEIGHT) - PANEL_VERTICAL_OFFSET,
+    );
+    wrapper.style.width = `${panelWidth}px`;
+    wrapper.style.maxWidth = `${panelWidth}px`;
+    wrapper.style.height = `${panelHeight}px`;
+    wrapper.style.minHeight = `${MIN_PANEL_HEIGHT}px`;
+    const host = wrapper.parentElement;
+    if (host) {
+        host.style.width = `${panelWidth}px`;
+        host.style.maxWidth = `${panelWidth}px`;
+        host.style.height = `${panelHeight}px`;
+        host.style.minHeight = `${MIN_PANEL_HEIGHT}px`;
+    }
+    return [panelWidth, panelHeight];
 }
 
 function makeButton(label, title, borderColor = "#536071") {
@@ -294,7 +321,8 @@ function addMultimodalSettings(node) {
         width: "calc(100% - 24px)",
         maxWidth: "calc(100% - 24px)",
         minWidth: "0",
-        height: `${PANEL_HEIGHT}px`,
+        height: `${MIN_PANEL_HEIGHT}px`,
+        minHeight: `${MIN_PANEL_HEIGHT}px`,
         padding: "8px",
         boxSizing: "border-box",
         overflow: "hidden",
@@ -419,12 +447,26 @@ function addMultimodalSettings(node) {
     });
 
     const systemGroup = document.createElement("label");
-    applyStyle(systemGroup, {display: "flex", flexDirection: "column", gap: "4px"});
+    applyStyle(systemGroup, {
+        display: "flex",
+        flexDirection: "column",
+        flex: "1 1 0",
+        minWidth: "0",
+        minHeight: "76px",
+        gap: "4px",
+    });
     const systemInput = makeTextarea("设置模型的身份和回答规则");
     systemGroup.append(makeLabel("系统提示词"), systemInput);
 
     const promptGroup = document.createElement("label");
-    applyStyle(promptGroup, {display: "flex", flexDirection: "column", gap: "4px"});
+    applyStyle(promptGroup, {
+        display: "flex",
+        flexDirection: "column",
+        flex: "1 1 0",
+        minWidth: "0",
+        minHeight: "76px",
+        gap: "4px",
+    });
     const promptInput = makeTextarea("输入要发送给模型的问题");
     promptGroup.append(makeLabel("对话内容"), promptInput);
 
@@ -861,17 +903,26 @@ function addMultimodalSettings(node) {
     const domWidget = node.addDOMWidget("模型服务设置", "jindouyun_multimodal_llm", wrapper, {
         serialize: false,
         hideOnZoom: false,
-        getMinHeight: () => PANEL_HEIGHT,
-        getMaxHeight: () => PANEL_HEIGHT,
+        getMinHeight: () => MIN_PANEL_HEIGHT,
     });
-    domWidget.computeSize = (width) => [Math.max(320, Number(width || node.size?.[0] || 440) - 24), PANEL_HEIGHT];
+    domWidget.computeSize = (width) => {
+        const [panelWidth] = syncPanelSize(node, wrapper, width);
+        return [panelWidth, MIN_PANEL_HEIGHT];
+    };
     domWidget.serialize = false;
+    const originalOnResize = node.onResize;
+    node.onResize = function() {
+        const result = originalOnResize?.apply(this, arguments);
+        syncPanelSize(this, wrapper);
+        return result;
+    };
     node.__jindouyunMultimodalSync = syncFromWidgets;
     syncFromWidgets();
     node.setSize?.([
         Math.max(440, Number(node.size?.[0] || 440)),
-        Math.max(790, Number(node.size?.[1] || 790)),
+        Math.max(MIN_NODE_HEIGHT, Number(node.size?.[1] || MIN_NODE_HEIGHT)),
     ]);
+    syncPanelSize(node, wrapper);
 }
 
 app.registerExtension({
