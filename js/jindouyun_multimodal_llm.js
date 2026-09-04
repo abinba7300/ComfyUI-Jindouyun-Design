@@ -8,8 +8,8 @@ import {
 
 
 const NODE_TYPE = "JindouyunMultimodalLLM";
-const MIN_PANEL_HEIGHT = 550;
-const MIN_NODE_HEIGHT = 790;
+const MIN_PANEL_HEIGHT = 560;
+const MIN_NODE_HEIGHT = 800;
 const PANEL_VERTICAL_OFFSET = MIN_NODE_HEIGHT - MIN_PANEL_HEIGHT;
 const PROVIDER_STORAGE_KEY = "jindouyun.multimodal.provider";
 const API_KEYS_STORAGE_KEY = "jindouyun.multimodal.apiKeys";
@@ -183,6 +183,33 @@ function makeLabel(text) {
         whiteSpace: "nowrap",
     });
     return label;
+}
+
+function makePromptHeader(labelText, buttonTitle) {
+    const header = document.createElement("div");
+    applyStyle(header, {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        minHeight: "20px",
+        gap: "6px",
+    });
+    const button = makeButton("✦", buttonTitle, "#4FA875");
+    button.setAttribute("aria-label", buttonTitle);
+    applyStyle(button, {
+        width: "24px",
+        minWidth: "24px",
+        height: "20px",
+        minHeight: "20px",
+        padding: "0",
+        borderRadius: "4px",
+        background: "transparent",
+        color: "#8EE6AE",
+        fontSize: "15px",
+        lineHeight: "18px",
+    });
+    header.append(makeLabel(labelText), button);
+    return {header, button};
 }
 
 function safeMessage(payload, fallback) {
@@ -446,29 +473,37 @@ function addMultimodalSettings(node) {
         whiteSpace: "nowrap",
     });
 
-    const systemGroup = document.createElement("label");
+    const systemGroup = document.createElement("div");
     applyStyle(systemGroup, {
         display: "flex",
         flexDirection: "column",
         flex: "1 1 0",
         minWidth: "0",
-        minHeight: "76px",
+        minHeight: "82px",
         gap: "4px",
     });
     const systemInput = makeTextarea("设置模型的身份和回答规则");
-    systemGroup.append(makeLabel("系统提示词"), systemInput);
+    const {header: systemHeader, button: optimizeSystemButton} = makePromptHeader(
+        "系统提示词",
+        "优化系统提示词",
+    );
+    systemGroup.append(systemHeader, systemInput);
 
-    const promptGroup = document.createElement("label");
+    const promptGroup = document.createElement("div");
     applyStyle(promptGroup, {
         display: "flex",
         flexDirection: "column",
         flex: "1 1 0",
         minWidth: "0",
-        minHeight: "76px",
+        minHeight: "82px",
         gap: "4px",
     });
     const promptInput = makeTextarea("输入要发送给模型的问题");
-    promptGroup.append(makeLabel("对话内容"), promptInput);
+    const {header: promptHeader, button: optimizePromptButton} = makePromptHeader(
+        "对话内容",
+        "优化对话内容",
+    );
+    promptGroup.append(promptHeader, promptInput);
 
     const presetRow = document.createElement("div");
     applyStyle(presetRow, {
@@ -746,6 +781,84 @@ function addMultimodalSettings(node) {
         }
     }
 
+    function selectedModelName() {
+        return String(
+            (manualMode ? modelInput.value : modelSelect.value)
+            || modelInput.value
+            || modelWidget.value
+            || "",
+        ).trim();
+    }
+
+    async function optimizePrompt(input, widget, promptType, label, button) {
+        const text = input.value.trim();
+        const provider = providerSelect.value;
+        const apiKey = keyInput.value.trim();
+        const baseUrl = baseInput.value.trim();
+        const model = selectedModelName();
+        if (!text) {
+            setStatus(`请先填写${label}`, "error");
+            input.focus();
+            return;
+        }
+        if (!apiKey && provider !== "自定义 OpenAI 兼容") {
+            setStatus("请先填写 API Key", "error");
+            keyInput.focus();
+            return;
+        }
+        if (!baseUrl) {
+            setStatus("请先填写 Base URL", "error");
+            baseInput.focus();
+            return;
+        }
+        if (!model) {
+            setStatus("请先获取并选择模型，或手工填写模型名称", "error");
+            return;
+        }
+
+        const buttons = [optimizeSystemButton, optimizePromptButton];
+        buttons.forEach((item) => {
+            item.disabled = true;
+            item.style.opacity = "0.5";
+        });
+        const originalIcon = button.textContent;
+        button.textContent = "…";
+        setStatus(`正在优化${label}...`, "loading");
+        try {
+            const response = await api.fetchApi("/jindouyun_design/llm/optimize_prompt", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    provider,
+                    api_key: apiKey,
+                    base_url: baseUrl,
+                    model,
+                    text,
+                    prompt_type: promptType,
+                    timeout: normalizedNumber(timeoutInput.value, 120, 5, 7200, true),
+                }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || !payload.ok) {
+                throw new Error(safeMessage(payload, `HTTP ${response.status}`));
+            }
+            const optimized = String(payload.text || "").trim();
+            if (!optimized) throw new Error("模型没有返回优化后的提示词");
+            input.value = optimized;
+            setWidgetValue(widget, optimized, node);
+            setStatus(`${label}已优化`, "success");
+            input.focus();
+        } catch (error) {
+            setStatus(`${label}优化失败：${safeMessage({error: error?.message}, "请求失败")}`, "error");
+        } finally {
+            button.textContent = originalIcon;
+            buttons.forEach((item) => {
+                item.disabled = false;
+                item.style.opacity = "1";
+            });
+        }
+    }
+
     function syncFromWidgets() {
         let provider = PROVIDERS[providerWidget.value] ? providerWidget.value : "OpenAI";
         const recentProvider = storedProvider();
@@ -852,6 +965,12 @@ function addMultimodalSettings(node) {
     manualModeButton.addEventListener("click", () => setManualMode(!manualMode));
     systemInput.addEventListener("input", () => setWidgetValue(systemWidget, systemInput.value, node));
     promptInput.addEventListener("input", () => setWidgetValue(promptWidget, promptInput.value, node));
+    optimizeSystemButton.addEventListener("click", () => {
+        optimizePrompt(systemInput, systemWidget, "system", "系统提示词", optimizeSystemButton);
+    });
+    optimizePromptButton.addEventListener("click", () => {
+        optimizePrompt(promptInput, promptWidget, "user", "对话内容", optimizePromptButton);
+    });
     presetSelect.addEventListener("change", applySelectedPromptPreset);
     savePresetButton.addEventListener("click", saveCurrentPromptPreset);
     presetNameInput.addEventListener("keydown", (event) => {

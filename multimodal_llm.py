@@ -51,6 +51,18 @@ PROVIDER_PRESETS = {
 MAX_INPUT_IMAGES = 16
 LEGACY_IMAGE_PROMPT = "请分析输入的图片。"
 DEFAULT_ASSISTANT_PROMPT = "你好，请介绍一下你能提供哪些帮助。"
+PROMPT_OPTIMIZER_INSTRUCTIONS = {
+    "system": (
+        "你是系统提示词优化专家。请在不改变原始意图、事实、专有名词和必要限制的前提下，"
+        "把用户提供的系统提示词改写得更清晰、准确、可执行。明确角色、目标、约束和输出要求；"
+        "不要凭空增加用户未要求的任务。只输出优化后的系统提示词，不要解释、评价、加标题或使用代码块。"
+    ),
+    "user": (
+        "你是用户提示词优化专家。请根据原文含义，在不改变原始诉求、事实、专有名词和必要限制的前提下，"
+        "把用户提供的对话内容改写得更清晰、具体、易于模型执行。必要时整理上下文、目标和输出要求；"
+        "不要代替用户回答问题。只输出优化后的提示词，不要解释、评价、加标题或使用代码块。"
+    ),
+}
 
 
 def normalize_base_url(value: Any) -> str:
@@ -392,6 +404,58 @@ def extract_response_text(payload: Any) -> str:
                     parts.append(str(text))
         return "".join(parts)
     return str(content or "")
+
+
+def optimize_prompt_text(
+    provider: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+    text: str,
+    prompt_type: str = "user",
+    timeout: int = 120,
+    opener: Callable[..., Any] | None = None,
+) -> str:
+    source_text = str(text or "").strip()
+    if not source_text:
+        raise ValueError("请先输入需要优化的提示词")
+    selected_model = str(model or "").strip()
+    if not selected_model:
+        raise ValueError("请先获取并选择模型，或手工填写模型名称")
+    kind = str(prompt_type or "user").strip().lower()
+    if kind not in PROMPT_OPTIMIZER_INSTRUCTIONS:
+        raise ValueError("提示词类型不正确")
+
+    provider_name = str(provider or "OpenAI")
+    resolved_base_url = resolve_provider_base_url(provider_name, base_url)
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": PROMPT_OPTIMIZER_INSTRUCTIONS[kind]},
+            {
+                "role": "user",
+                "content": f"请优化下面这段提示词：\n\n{source_text}",
+            },
+        ],
+        "temperature": 0.3,
+        "max_tokens": 4096,
+        "stream": False,
+    }
+    if provider_name in {"OpenAI", "Kimi"}:
+        payload["max_completion_tokens"] = payload.pop("max_tokens")
+    response = request_json(
+        chat_completions_url(resolved_base_url),
+        str(api_key or "").strip(),
+        provider_name,
+        method="POST",
+        payload=payload,
+        timeout=_bounded_int(timeout, 120, 5, 7200),
+        opener=opener,
+    )
+    optimized = extract_response_text(response).strip()
+    if not optimized:
+        raise RuntimeError("模型已返回结果，但没有找到优化后的提示词")
+    return optimized
 
 
 class JindouyunMultimodalLLM:

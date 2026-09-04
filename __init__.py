@@ -14,7 +14,11 @@ from .transparent_crop import JindouyunTransparentCrop
 from .show_anything import JindouyunShowAnything
 from .number_slider import JindouyunNumberSlider
 from .string_router import JindouyunStringRouter
-from .multimodal_llm import JindouyunMultimodalLLM, list_provider_models
+from .multimodal_llm import (
+    JindouyunMultimodalLLM,
+    list_provider_models,
+    optimize_prompt_text,
+)
 from .load_image import (
     JindouyunLoadImage,
     list_sibling_images,
@@ -552,6 +556,24 @@ async def fetch_llm_models(request):
     return web.json_response({"models": models, "count": len(models)})
 
 
+async def optimize_llm_prompt(request):
+    data = await request.json()
+    try:
+        optimized = await asyncio.to_thread(
+            optimize_prompt_text,
+            str(data.get("provider") or "OpenAI"),
+            str(data.get("api_key") or ""),
+            str(data.get("base_url") or ""),
+            str(data.get("model") or ""),
+            str(data.get("text") or ""),
+            str(data.get("prompt_type") or "user"),
+            data.get("timeout", 120),
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    return web.json_response({"ok": True, "text": optimized})
+
+
 try:
     from server import PromptServer
 
@@ -572,6 +594,7 @@ try:
         prompt_server.routes.post("/jindouyun_design/open_folder")(open_local_folder)
         prompt_server.routes.get("/jindouyun_design/execution_timer_sound")(execution_timer_sound)
         prompt_server.routes.post("/jindouyun_design/llm/models")(fetch_llm_models)
+        prompt_server.routes.post("/jindouyun_design/llm/optimize_prompt")(optimize_llm_prompt)
         prompt_server.routes.post("/krea2_random_lora/select_folder")(select_lora_folder)
         register_workflow_backup_routes(prompt_server)
 except Exception:

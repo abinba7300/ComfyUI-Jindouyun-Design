@@ -219,6 +219,52 @@ class JindouyunMultimodalLlmTests(unittest.TestCase):
         self.assertNotIn(key, error)
         self.assertIn("***", error)
 
+    def test_prompt_optimizer_uses_selected_service_and_returns_only_text(self):
+        captured = {}
+
+        def fake_json_request(url, api_key, provider, method="GET", payload=None, timeout=30, opener=None):
+            captured.update(
+                url=url,
+                api_key=api_key,
+                provider=provider,
+                method=method,
+                payload=payload,
+                timeout=timeout,
+            )
+            return {"choices": [{"message": {"content": "  优化后的提示词  "}}]}
+
+        with mock.patch.object(self.module, "request_json", side_effect=fake_json_request):
+            result = self.module.optimize_prompt_text(
+                "OpenAI",
+                "secret-key",
+                "https://api.openai.com/v1",
+                "gpt-test",
+                "帮我分析图片",
+                "user",
+                45,
+            )
+
+        self.assertEqual(result, "优化后的提示词")
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["timeout"], 45)
+        self.assertIn("不要代替用户回答问题", captured["payload"]["messages"][0]["content"])
+        self.assertIn("帮我分析图片", captured["payload"]["messages"][1]["content"])
+        self.assertIn("max_completion_tokens", captured["payload"])
+
+    def test_prompt_optimizer_rejects_blank_text_without_api_request(self):
+        with mock.patch.object(self.module, "request_json") as request:
+            with self.assertRaisesRegex(ValueError, "请先输入"):
+                self.module.optimize_prompt_text(
+                    "OpenAI",
+                    "secret-key",
+                    "https://api.openai.com/v1",
+                    "gpt-test",
+                    "   ",
+                    "system",
+                )
+        request.assert_not_called()
+
     def test_node_posts_chat_completion_and_extracts_text(self):
         captured = {}
 
