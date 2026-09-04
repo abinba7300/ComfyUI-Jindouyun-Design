@@ -14,6 +14,9 @@ assert.match(source, /ctx\.roundRect\(left, top, buttonWidth, buttonHeight, 6\)/
 assert.match(source, /ctx\.fillStyle = pressed \? "#1F6B43" : hovered \? "#3EAF72" : "#2E8B57"/);
 assert.match(source, /ctx\.strokeStyle = hovered \? "#9AF0B8" : "#61C98A"/);
 assert.match(source, /patchUploadButton\(node\);/);
+assert.match(source, /findWidget\(node, "图片文件夹"\)/);
+assert.match(source, /node\.__jindouyunApplyingRandomFolderImage/);
+assert.match(source, /node\.__jindouyunPreserveCropForRandomFolder/);
 
 function loadRotationGeometry(script) {
     const normalize = script.match(/function normalizeRotationDegrees\(value\) \{[\s\S]*?\n\}/)?.[0];

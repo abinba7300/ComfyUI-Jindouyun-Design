@@ -63,6 +63,15 @@ function addImageBrowser(node) {
     if (!imageWidget || !sourcePathWidget) return;
     node.__jindouyunLoadImageBrowser = true;
 
+    // This node supplies its own local-image button.  Keeping ComfyUI's
+    // generated IMAGEUPLOAD widget visible duplicates the control and its DOM
+    // minimum width can extend beyond a narrow/resized node.
+    const uploadWidget = findWidget(node, "upload");
+    if (uploadWidget) {
+        uploadWidget.type = "hidden";
+        uploadWidget.computeSize = () => [0, -4];
+        if (uploadWidget.inputEl) uploadWidget.inputEl.style.display = "none";
+    }
     sourcePathWidget.type = "hidden";
     sourcePathWidget.computeSize = () => [0, -4];
 

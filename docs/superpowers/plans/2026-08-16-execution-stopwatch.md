@@ -103,8 +103,8 @@ Expected: 全部通过。
 ### Task 4: 替换为真实面包机完成铃声
 
 **Files:**
-- Create: `js/assets/toaster-oven-ding-sethlind-cc0.mp3`
-- Create: `js/assets/README.md`
+- Create: `assets/toaster-oven-ding-sethlind-cc0.mp3`
+- Create: `assets/README.md`
 - Modify: `js/jindouyun_execution_timer.js`
 - Modify: `tests/test_execution_timer_ui.mjs`
 

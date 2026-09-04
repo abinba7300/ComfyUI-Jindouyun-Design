@@ -12,10 +12,8 @@ const STYLE_ID = "jindouyun-execution-timer-style";
 const POSITION_KEY = "jindouyun.executionTimer.position";
 const SOUND_KEY = "jindouyun.executionTimer.soundEnabled";
 const VIEWPORT_GAP = 12;
-const COMPLETION_SOUND_URL = new URL(
-    "./assets/toaster-oven-ding-sethlind-cc0.mp3",
-    import.meta.url,
-).href;
+const COMPLETION_SOUND_ROUTE = "/jindouyun_design/execution_timer_sound";
+const COMPLETION_SOUND_URL = api.fileURL(COMPLETION_SOUND_ROUTE);
 
 const timerState = createExecutionTimerState();
 let timerElement = null;
@@ -253,9 +251,6 @@ async function unlockAudio() {
     if (context?.state === "suspended") {
         await context.resume().catch(() => {});
     }
-    if (context?.state === "running" && soundEnabled) {
-        loadCompletionSound(context).catch(() => {});
-    }
 }
 
 function playFallbackChime(context) {
@@ -445,6 +440,24 @@ function handleExecutionStart({detail} = {}) {
     animateTimer();
 }
 
+function ensureExecutionStarted(detail) {
+    if (timerState.snapshot().status !== "running") {
+        handleExecutionStart({detail});
+    }
+}
+
+function handleExecuting({detail} = {}) {
+    if (detail == null) {
+        handleExecutionEnd("success", null);
+        return;
+    }
+    ensureExecutionStarted(detail);
+}
+
+function handleExecutionActivity({detail} = {}) {
+    ensureExecutionStarted(detail);
+}
+
 function handleExecutionEnd(finalStatus, detail) {
     if (!timerState.finish(finalStatus, promptIdFromDetail(detail), performance.now())) return;
     stopAnimation();
@@ -461,6 +474,8 @@ function bindExecutionEvents() {
     api.addEventListener("execution_success", ({detail} = {}) => handleExecutionEnd("success", detail));
     api.addEventListener("execution_error", ({detail} = {}) => handleExecutionEnd("error", detail));
     api.addEventListener("execution_interrupted", ({detail} = {}) => handleExecutionEnd("interrupted", detail));
+    api.addEventListener("executing", handleExecuting);
+    api.addEventListener("execution_cached", handleExecutionActivity);
 }
 
 function setupTimer() {

@@ -30,6 +30,14 @@ class FolderDialogTests(unittest.TestCase):
         self.assertIn('["explorer.exe", str(folder)]', self.source)
         self.assertIn('routes.post("/jindouyun_design/open_folder")', self.source)
 
+    def test_interactive_crop_random_folder_route_is_registered(self):
+        self.assertIn("async def select_random_crop_image_folder(request):", self.source)
+        self.assertIn("prepare_random_image_from_folder", self.source)
+        self.assertIn(
+            'routes.post("/jindouyun_design/select_random_crop_image_folder")',
+            self.source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

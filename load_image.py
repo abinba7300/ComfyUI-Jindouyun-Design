@@ -1,6 +1,9 @@
 import re
 import hashlib
+import os
+import random
 import shutil
+import threading
 from pathlib import Path
 
 import folder_paths
@@ -9,10 +12,21 @@ from nodes import LoadImage
 
 _NATURAL_PARTS = re.compile(r"(\d+)")
 _LOCAL_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+_RANDOM_FOLDER_STATES = {}
+_RANDOM_FOLDER_LOCK = threading.Lock()
 
 
 def _natural_key(value):
     return [int(part) if part.isdigit() else part.casefold() for part in _NATURAL_PARTS.split(str(value))]
+
+
+def _same_local_path(left, right):
+    if left is None or right is None:
+        return False
+    try:
+        return os.path.samefile(left, right)
+    except (OSError, ValueError):
+        return os.path.normcase(os.path.abspath(str(left))) == os.path.normcase(os.path.abspath(str(right)))
 
 
 def _annotated_root(image_name):
@@ -98,6 +112,55 @@ def prepare_local_image(source_path):
         "index": index,
         "total": len(images),
     }
+
+
+def prepare_random_image_from_folder(folder_path, exclude_source_path=""):
+    raw_path = str(folder_path or "").strip().strip('"')
+    if not raw_path:
+        raise ValueError("图片文件夹为空")
+
+    folder = Path(raw_path).expanduser().resolve()
+    if not folder.is_dir():
+        raise ValueError(f"图片文件夹不存在: {folder}")
+
+    images = sorted(
+        (
+            item
+            for item in folder.iterdir()
+            if item.is_file() and item.suffix.lower() in _LOCAL_IMAGE_EXTENSIONS
+        ),
+        key=lambda item: _natural_key(item.name),
+    )
+    if not images:
+        raise ValueError("所选文件夹中没有可加载的图片")
+
+    folder_key = str(folder).casefold()
+    image_signature = tuple(str(item).casefold() for item in images)
+    exclude_text = str(exclude_source_path or "").strip().strip('"')
+    explicit_exclude = Path(exclude_text).expanduser().resolve() if exclude_text else None
+    with _RANDOM_FOLDER_LOCK:
+        state = _RANDOM_FOLDER_STATES.get(folder_key)
+        previous = explicit_exclude or (state or {}).get("last")
+        if state is None or state.get("signature") != image_signature:
+            state = {"signature": image_signature, "remaining": [], "last": previous}
+            _RANDOM_FOLDER_STATES[folder_key] = state
+
+        if not state["remaining"]:
+            state["remaining"] = list(images)
+            random.shuffle(state["remaining"])
+
+        eligible_indexes = [
+            index
+            for index, item in enumerate(state["remaining"])
+            if len(images) == 1 or not _same_local_path(item, previous)
+        ]
+        selected_index = eligible_indexes[-1] if eligible_indexes else len(state["remaining"]) - 1
+        selected = state["remaining"].pop(selected_index)
+        state["last"] = selected
+
+    result = prepare_local_image(selected)
+    result["folder_image_count"] = len(images)
+    return result
 
 
 def _file_digest(path):

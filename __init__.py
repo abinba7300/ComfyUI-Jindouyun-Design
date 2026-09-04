@@ -14,11 +14,13 @@ from .transparent_crop import JindouyunTransparentCrop
 from .show_anything import JindouyunShowAnything
 from .number_slider import JindouyunNumberSlider
 from .string_router import JindouyunStringRouter
+from .multimodal_llm import JindouyunMultimodalLLM, list_provider_models
 from .load_image import (
     JindouyunLoadImage,
     list_sibling_images,
     navigate_local_image,
     prepare_local_image,
+    prepare_random_image_from_folder,
     resolve_dropped_source,
 )
 from .save_image import JindouyunSaveImage, create_subfolder, delete_saved_image
@@ -27,6 +29,11 @@ from .workflow_backup import register_workflow_backup_routes
 
 
 _restart_requested = False
+_EXECUTION_TIMER_SOUND = (
+    Path(__file__).resolve().parent
+    / "assets"
+    / "toaster-oven-ding-sethlind-cc0.mp3"
+)
 
 
 async def select_lora_folder(request):
@@ -425,6 +432,25 @@ async def select_local_image(request):
     return web.json_response(result)
 
 
+async def select_random_crop_image_folder(request):
+    data = await request.json()
+    initial_path = str(data.get("initial_path") or "").strip().strip('"')
+    try:
+        selected = await asyncio.to_thread(
+            _select_folder_with_windows_dialog,
+            initial_path,
+            "选择图片文件夹（确认后立即随机加载一张）",
+        )
+        result = (
+            await asyncio.to_thread(prepare_random_image_from_folder, selected)
+            if selected
+            else {"cancelled": True}
+        )
+    except (OSError, ValueError, RuntimeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    return web.json_response(result)
+
+
 async def navigate_local_image_route(request):
     data = await request.json()
     try:
@@ -497,6 +523,35 @@ async def open_local_folder(request):
     return web.json_response({"ok": True, "path": str(folder)})
 
 
+async def execution_timer_sound(request):
+    if not _EXECUTION_TIMER_SOUND.is_file():
+        return web.Response(status=404, text="Completion sound not found")
+    return web.FileResponse(
+        _EXECUTION_TIMER_SOUND,
+        headers={
+            "Content-Type": "audio/mpeg",
+            "Content-Disposition": "inline",
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+async def fetch_llm_models(request):
+    data = await request.json()
+    try:
+        models = await asyncio.to_thread(
+            list_provider_models,
+            str(data.get("provider") or "OpenAI"),
+            str(data.get("api_key") or ""),
+            str(data.get("base_url") or ""),
+            30,
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        return web.json_response({"models": [], "error": str(error)}, status=400)
+    return web.json_response({"models": models, "count": len(models)})
+
+
 try:
     from server import PromptServer
 
@@ -507,11 +562,16 @@ try:
         prompt_server.routes.post("/jindouyun_design/image_siblings")(image_siblings)
         prompt_server.routes.post("/jindouyun_design/resolve_dropped_image")(resolve_dropped_image)
         prompt_server.routes.post("/jindouyun_design/select_local_image")(select_local_image)
+        prompt_server.routes.post("/jindouyun_design/select_random_crop_image_folder")(
+            select_random_crop_image_folder
+        )
         prompt_server.routes.post("/jindouyun_design/navigate_local_image")(navigate_local_image_route)
         prompt_server.routes.post("/jindouyun_design/select_save_folder")(select_save_folder)
         prompt_server.routes.post("/jindouyun_design/create_folder")(create_save_folder)
         prompt_server.routes.post("/jindouyun_design/delete_saved_image")(delete_save_image)
         prompt_server.routes.post("/jindouyun_design/open_folder")(open_local_folder)
+        prompt_server.routes.get("/jindouyun_design/execution_timer_sound")(execution_timer_sound)
+        prompt_server.routes.post("/jindouyun_design/llm/models")(fetch_llm_models)
         prompt_server.routes.post("/krea2_random_lora/select_folder")(select_lora_folder)
         register_workflow_backup_routes(prompt_server)
 except Exception:
@@ -566,6 +626,7 @@ NODE_CLASS_MAPPINGS = {
     "JindouyunShowAnything": JindouyunShowAnything,
     "JindouyunNumberSlider": JindouyunNumberSlider,
     "JindouyunStringRouter": JindouyunStringRouter,
+    "JindouyunMultimodalLLM": JindouyunMultimodalLLM,
     "JindouyunLoadImage": JindouyunLoadImage,
     "JindouyunSaveImage": JindouyunSaveImage,
     "JindouyunRandomLora": JindouyunRandomLora,
@@ -582,6 +643,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "JindouyunShowAnything": "筋斗云-显示任何",
     "JindouyunNumberSlider": "筋斗云-数值滑块",
     "JindouyunStringRouter": "筋斗云-提示词",
+    "JindouyunMultimodalLLM": "筋斗云-多模态LLM",
     "JindouyunLoadImage": "筋斗云-加载图像",
     "JindouyunSaveImage": "筋斗云-保存图像",
     "JindouyunRandomLora": "筋斗云-随机LoRA",

@@ -1,8 +1,11 @@
 import sys
+import math
+import tempfile
 import unittest
 from pathlib import Path
 
 import torch
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -197,6 +200,27 @@ class InteractiveCropTests(unittest.TestCase):
         self.assertTrue(qualified)
         self.assertFalse(needs_upscale)
 
+    def test_folder_mode_randomizes_on_every_execution_and_reports_preview(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            Image.new("RGB", (8, 6), (255, 0, 0)).save(folder / "red.png")
+            Image.new("RGB", (8, 6), (0, 255, 0)).save(folder / "green.png")
+            node = JindouyunInteractiveCrop()
+
+            first = node.crop(图片文件夹=str(folder), 分流标准最大边=1)
+            second = node.crop(图片文件夹=str(folder), 分流标准最大边=1)
+
+            self.assertIsInstance(first, dict)
+            self.assertIsInstance(second, dict)
+            first_info = first["ui"]["jindouyun_random_folder_image"][0]
+            second_info = second["ui"]["jindouyun_random_folder_image"][0]
+            self.assertNotEqual(first_info["source_path"], second_info["source_path"])
+            self.assertFalse(torch.equal(first["result"][0], second["result"][0]))
+
+    def test_folder_mode_always_bypasses_execution_cache(self):
+        changed = JindouyunInteractiveCrop.IS_CHANGED(图片文件夹="D:/images")
+        self.assertTrue(math.isnan(changed))
+
     def test_locked_aspect_ratio_scales_width_and_height_together(self):
         image = torch.zeros((1, 50, 100, 3), dtype=torch.float32)
         result = resize_image_by_percent(
@@ -336,6 +360,7 @@ class InteractiveCropTests(unittest.TestCase):
         self.assertEqual(schema["required"]["最大边分辨率"][1]["max"], 16384)
         self.assertEqual(schema["required"]["最大边分辨率"][1]["step"], 1)
         self.assertFalse(schema["required"]["启用最大边分辨率"][1]["default"])
+        self.assertEqual(schema["required"]["图片文件夹"][1]["default"], "")
         self.assertEqual(schema["required"]["放大方法"][0], RESIZE_METHODS)
         self.assertEqual(schema["required"]["放大方法"][1]["default"], RESIZE_METHODS[0])
         self.assertTrue(schema["required"]["锁定长宽比"][1]["default"])
@@ -369,6 +394,7 @@ class InteractiveCropTests(unittest.TestCase):
                 "高度比例",
                 "分流标准最大边",
                 "启用最大边分辨率",
+                "图片文件夹",
             ],
         )
         self.assertEqual(required["图片旋转"][0], "FLOAT")

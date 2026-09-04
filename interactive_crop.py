@@ -464,6 +464,14 @@ class JindouyunInteractiveCrop:
                     "BOOLEAN",
                     {"default": False, "label_on": "开启", "label_off": "关闭"},
                 ),
+                "图片文件夹": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": False,
+                        "tooltip": "选择后每次运行都会从该文件夹随机加载一张图片。",
+                    },
+                ),
             },
             "optional": {
                 "图像": ("IMAGE",),
@@ -481,6 +489,12 @@ class JindouyunInteractiveCrop:
     def VALIDATE_INPUTS(cls, **kwargs):
         return True
 
+    @classmethod
+    def IS_CHANGED(cls, 图片文件夹="", **kwargs):
+        if str(图片文件夹 or "").strip():
+            return float("nan")
+        return str(kwargs.get("上传图片") or "")
+
     def crop(
         self,
         上传图片="",
@@ -495,9 +509,21 @@ class JindouyunInteractiveCrop:
         高度比例=100.0,
         分流标准最大边=1024,
         启用最大边分辨率=False,
+        图片文件夹="",
         图像=None,
     ):
-        source = 图像 if isinstance(图像, torch.Tensor) else load_uploaded_image(上传图片)
+        random_folder_image = None
+        if isinstance(图像, torch.Tensor):
+            source = 图像
+        elif str(图片文件夹 or "").strip():
+            try:
+                from .load_image import prepare_random_image_from_folder
+            except ImportError:
+                from load_image import prepare_random_image_from_folder
+            random_folder_image = prepare_random_image_from_folder(图片文件夹)
+            source = load_uploaded_image(random_folder_image["image"])
+        else:
+            source = load_uploaded_image(上传图片)
         mirrored = mirror_image_tensor(
             source,
             horizontal=左右镜像,
@@ -520,4 +546,10 @@ class JindouyunInteractiveCrop:
         threshold = max(1, int(分流标准最大边 or 1024))
         original_crop_edge = max(int(original_crop.shape[1]), int(original_crop.shape[2]))
         is_qualified = original_crop_edge >= threshold
-        return result, is_qualified, not is_qualified
+        outputs = (result, is_qualified, not is_qualified)
+        if random_folder_image is not None:
+            return {
+                "ui": {"jindouyun_random_folder_image": [random_folder_image]},
+                "result": outputs,
+            }
+        return outputs

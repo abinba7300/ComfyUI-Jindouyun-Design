@@ -5,6 +5,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "load_image.py"
@@ -148,6 +149,75 @@ class JindouyunLoadImageTests(unittest.TestCase):
 
         self.assertEqual(result["images"], ["album/image1.jpg", "album/image2.png", "album/image10.png"])
         self.assertEqual(result["index"], 1)
+
+    def test_random_image_from_folder_filters_images_and_stages_selected_file(self):
+        album = self.root / "随机图片"
+        album.mkdir()
+        first = album / "第一张.png"
+        second = album / "第二张.webp"
+        first.write_bytes(b"first")
+        second.write_bytes(b"second")
+        (album / "说明.txt").write_text("not an image", encoding="utf-8")
+
+        shuffled_names = []
+
+        def capture_shuffle(values):
+            shuffled_names.extend(item.name for item in values)
+
+        with mock.patch.object(self.module.random, "shuffle", side_effect=capture_shuffle) as shuffle:
+            result = self.module.prepare_random_image_from_folder(album)
+
+        shuffle.assert_called_once()
+        self.assertEqual(set(shuffled_names), {"第一张.png", "第二张.webp"})
+        self.assertEqual(result["source_path"], str(second.resolve()))
+        self.assertEqual(result["folder_path"], str(album.resolve()))
+        self.assertEqual(result["image_name"], "第二张")
+        self.assertEqual(result["folder_image_count"], 2)
+        self.assertTrue((self.input_dir / result["image"]).is_file())
+
+    def test_random_image_from_folder_rejects_folder_without_images(self):
+        album = self.root / "空目录"
+        album.mkdir()
+        (album / "说明.txt").write_text("not an image", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "没有可加载的图片"):
+            self.module.prepare_random_image_from_folder(album)
+
+    def test_random_image_from_folder_avoids_immediate_repeat(self):
+        album = self.root / "两张图"
+        album.mkdir()
+        first = album / "one.png"
+        second = album / "two.png"
+        first.write_bytes(b"first")
+        second.write_bytes(b"second")
+
+        with mock.patch.object(self.module.random, "shuffle", side_effect=lambda values: None):
+            result = self.module.prepare_random_image_from_folder(
+                album,
+                exclude_source_path=first,
+            )
+
+        self.assertEqual(result["source_path"], str(second.resolve()))
+
+    def test_random_folder_visits_every_image_once_before_repeating(self):
+        album = self.root / "整轮洗牌"
+        album.mkdir()
+        expected_names = {f"image-{index}.png" for index in range(6)}
+        for name in expected_names:
+            (album / name).write_bytes(name.encode("utf-8"))
+
+        with mock.patch.object(
+            self.module.random,
+            "choice",
+            side_effect=lambda candidates: candidates[0],
+        ):
+            draws = [
+                Path(self.module.prepare_random_image_from_folder(album)["source_path"]).name
+                for _ in range(len(expected_names) * 2)
+            ]
+
+        self.assertEqual(set(draws[:len(expected_names)]), expected_names)
+        self.assertEqual(set(draws[len(expected_names):]), expected_names)
 
     def test_path_outside_allowed_directories_is_rejected(self):
         with self.assertRaises(ValueError):

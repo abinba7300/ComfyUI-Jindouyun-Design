@@ -2346,12 +2346,19 @@ function patchUploadWidget(node) {
         const currentValue = String(value ?? "");
         node.__jindouyunCropUpload = null;
         if (resetReady && currentValue && currentValue !== previousValue) {
-            if (node.__jindouyunResetForNewImage) {
-                node.__jindouyunResetForNewImage();
-            } else {
-                setWidgetValue(findWidget(node, "图片旋转"), 0, node);
-                setWidgetValue(findWidget(node, "裁剪数据"), serializeCrop(DEFAULT_CROP), node);
-                updateCropStatus(node);
+            if (!node.__jindouyunApplyingRandomFolderImage) {
+                setWidgetValue(findWidget(node, "图片文件夹"), "", node);
+                node.properties ||= {};
+                node.properties.jindouyunCropImageFolder = "";
+            }
+            if (!node.__jindouyunPreserveCropForRandomFolder) {
+                if (node.__jindouyunResetForNewImage) {
+                    node.__jindouyunResetForNewImage();
+                } else {
+                    setWidgetValue(findWidget(node, "图片旋转"), 0, node);
+                    setWidgetValue(findWidget(node, "裁剪数据"), serializeCrop(DEFAULT_CROP), node);
+                    updateCropStatus(node);
+                }
             }
         }
         previousValue = currentValue;
@@ -2362,9 +2369,11 @@ function patchUploadWidget(node) {
 function patchUploadButton(node) {
     const widgets = node.widgets || [];
     const widget = widgets.find((item) => (
-        item.type === "button"
-        || item.constructor?.name === "ButtonWidget"
-        || /选择.*上传|choose.*upload/i.test(String(item.label || ""))
+        item.name === "upload"
+        || /选择.*上传|choose.*upload/i.test(String(item.label || item.name || ""))
+    )) || widgets.find((item) => (
+        !item.__jindouyunRandomFolderButton
+        && (item.type === "button" || item.constructor?.name === "ButtonWidget")
     ));
     if (!widget) {
         const retryCount = Number(node.__jindouyunUploadButtonRetryCount || 0);

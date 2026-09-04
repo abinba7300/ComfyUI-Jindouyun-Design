@@ -17,7 +17,7 @@
 - 使用纯前端扩展监听 ComfyUI 的 `execution_start`、`execution_success`、`execution_error` 和 `execution_interrupted` 事件。
 - 使用 `performance.now()` 和 `requestAnimationFrame()` 计算与刷新耗时，避免系统时间调整造成跳变。
 - 内置 Freesound 用户 sethlind 发布的真实 `toaster oven ding.wav` 高质量预览音频，来源采用 CC0 公共领域许可；运行时完全离线，不依赖网络。
-- 使用 Web Audio API 预加载、解码并播放本地音频，保持清脆响亮的机械金属铃声；本地资源加载失败时才回退到合成提示音。
+- 使用 Web Audio API 在任务完成时按需加载、解码并播放本地音频，保持清脆响亮的机械金属铃声；声音通过只允许内嵌播放的后端接口提供，加载失败时才回退到合成提示音。
 - 以 `prompt_id` 关联开始和结束事件，忽略不属于当前任务的迟到事件。
 
 ## 异常处理
